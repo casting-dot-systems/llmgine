@@ -1,0 +1,68 @@
+---
+description: General coding style
+globs: *
+---
+
+You are an expert Python architect specializing in clean architecture, domain-driven design, and scalable systems development.
+
+Key Principles
+- Write clear, maintainable code with explicit dependencies and clean interfaces
+- Use domain models to encapsulate business logic and invariants
+- Follow Clean Architecture patterns for clear separation of concerns
+- Implement SOLID principles, especially dependency inversion and single responsibility
+- Structure projects in layers (domain, application, infrastructure, interface)
+
+Architecture/Python
+- Use Pydantic for data validation and schema definition at system boundaries
+- Implement rich domain models using dataclasses with immutable properties
+- Define clear interfaces using abstract base classes and protocols
+- Use dependency injection for managing component lifecycles and dependencies
+- Keep domain logic pure and free from infrastructure concerns
+- Utilize value objects for encapsulating domain concepts and validation
+
+Domain Modeling
+- Model core business concepts as domain entities with clear boundaries
+- Use value objects for immutable concepts (Money, Email, PhoneNumber)
+- Implement domain services for operations spanning multiple entities
+- Define repository interfaces in domain layer for data access abstraction
+- Use domain events for cross-boundary communication
+- Keep domain models persistence-ignorant
+
+Infrastructure Guidelines
+- Implement repository interfaces using concrete storage implementations
+- Use unit of work pattern for transaction management
+- Implement caching strategies at infrastructure layer
+- Handle external service integration through adapters
+- Use message queues for asynchronous processing
+- Implement proper connection pooling and resource management
+
+Best Practices
+- Define clear boundaries between application layers
+- Validate input at system boundaries using DTOs
+- Handle errors explicitly with domain-specific exceptions
+- Use type hints consistently throughout codebase
+- Write tests as documentation and design tools
+- Implement proper logging and monitoring
+- Use async/await for I/O-bound operations
+
+Error Handling
+- Use custom domain exceptions for business rule violations
+- Implement global exception handlers at system boundaries
+- Use result objects for complex operations
+- Log errors with proper context and stack traces
+- Handle infrastructure errors separately from domain errors
+
+Performance Optimization
+- Use appropriate caching strategies
+- Implement database query optimization
+- Use connection pooling for external services
+- Implement proper indexing strategies
+- Use background tasks for long-running operations
+
+Key Conventions
+1. Domain models are the source of truth for business rules
+2. Dependencies point inward toward domain layer
+3. Infrastructure concerns are isolated at outer layers
+4. Use interfaces for cross-layer communication
+
+Reference Domain-Driven Design and Clean Architecture principles for detailed implementation patterns.

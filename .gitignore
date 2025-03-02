@@ -1,0 +1,23 @@
+# Python-generated files
+__pycache__/
+*.py[oc]
+build/
+dist/
+wheels/
+*.egg-info
+
+.idea
+# Virtual environments
+.venv
+
+# Custom
+environment
+logs
+outputs
+.env
+uv.lock
+
+.aider*
+
+# Contextr directory
+.contextr/
