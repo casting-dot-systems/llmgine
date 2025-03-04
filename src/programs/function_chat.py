@@ -12,6 +12,12 @@ from tools.core.terminal import TerminalOperations
 from src.framework.utils import CLIStatusCallback
 from tools.pwsh import execute_command
 from src.interfaces.cli.observer import CLIObserver
+from tools.notion import (
+    query_projects_database,
+    get_project_tasks,
+    get_project_documents,
+    read_document,
+)
 
 # Configure logging
 logger.remove()
@@ -25,6 +31,7 @@ DEFAULT_SYSTEM_PROMPT_PATH = "prompts/core/agents/function_maker.md"
 
 class FunctionChatConfig(BaseModel):
     """Configuration model for FunctionChat"""
+
     mode: str
     model_name: str = DEFAULT_MODEL
     system_prompt_path: str = DEFAULT_SYSTEM_PROMPT_PATH
@@ -38,18 +45,18 @@ class FunctionChat:
         self.console = Console()
         self.api_key = config.api_key or os.getenv("OPENAI_API_KEY")
         if not self.api_key:
-            raise ValueError("No API key provided and OPENAI_API_KEY not found in environment")
+            raise ValueError(
+                "No API key provided and OPENAI_API_KEY not found in environment"
+            )
 
         self.client = ClientOpenAI.create_openai(self.api_key)
-        self.terminal = TerminalOperations(".")
+        self.terminal = TerminalOperations("./botenv")
 
         # Initialize CLI interface
         self.cli = self._setup_cli()
         # Initialize engine
         self.engine = self._setup_engine()
         self.engine.subscribe(CLIObserver(self.cli))
-
-
 
     def _setup_cli(self) -> ToolCLI:
         """Set up the CLI interface"""
@@ -69,10 +76,12 @@ Type your message to begin...
         """Set up the tool engine"""
         # Load system prompt
         try:
-            with open(self.config.system_prompt_path, "r", encoding='utf-8') as file:
+            with open(self.config.system_prompt_path, "r", encoding="utf-8") as file:
                 system_prompt = file.read()
         except FileNotFoundError:
-            logger.warning(f"System prompt file not found at {self.config.system_prompt_path}")
+            logger.warning(
+                f"System prompt file not found at {self.config.system_prompt_path}"
+            )
             system_prompt = "You are a helpful assistant that uses available tools."
 
         return ToolEngine(
@@ -85,10 +94,14 @@ Type your message to begin...
                 self.terminal.delete_file,
                 self.terminal.create_directory,
                 execute_command,
+                query_projects_database,
+                get_project_tasks,
+                get_project_documents,
+                read_document,
             ],
             mode=self.config.mode,
             system_prompt=system_prompt,
-            confirm = True
+            confirm=True,
         )
 
     def _handle_special_commands(self, user_input: str) -> bool:
@@ -117,9 +130,7 @@ Type your message to begin...
                     self.cli.add_message(msg.get("content"), "Assistant", "green")
                 elif msg.get("role") == "tool":
                     self.cli.add_message(
-                        msg.get("content")[:500],
-                        msg.get("name", "Tool"),
-                        "yellow"
+                        msg.get("content")[:500], msg.get("name", "Tool"), "yellow"
                     )
 
     def run(self):
@@ -144,10 +155,9 @@ Type your message to begin...
 
                     # Execute the request
                     self.engine.execute(user_input)
-                    self.engine.subject.notify({
-                        "type": "status_update",
-                        "message": "done"
-                    })
+                    self.engine.subject.notify(
+                        {"type": "status_update", "message": "done"}
+                    )
                     # Process new messages
                     messages = self.engine.store.retrieve()
                     self._process_messages(count, messages)
@@ -156,13 +166,18 @@ Type your message to begin...
                     self.cli.redraw()
 
                 except KeyboardInterrupt:
-                    if self.cli.get_input("Do you want to exit? (y/n): ").lower() == 'y':
+                    if (
+                        self.cli.get_input("Do you want to exit? (y/n): ").lower()
+                        == "y"
+                    ):
                         break
                     continue
                 except Exception as e:
                     logger.error(f"Error in chat loop: {str(e)}")
                     self.cli.print_error(f"Error: {str(e)}")
-                    self.cli.print_info("You can continue chatting or type 'exit' to quit.")
+                    self.cli.print_info(
+                        "You can continue chatting or type 'exit' to quit."
+                    )
 
         except Exception as e:
             logger.error(f"Fatal error: {str(e)}")
@@ -176,10 +191,7 @@ def main(mode: str = "normal", model_name: str = DEFAULT_MODEL):
     try:
         load_dotenv()
 
-        config = FunctionChatConfig(
-            mode=mode,
-            model_name=model_name
-        )
+        config = FunctionChatConfig(mode=mode, model_name=model_name)
 
         chat = FunctionChat(config)
         chat.run()
