@@ -1,0 +1,15 @@
+*.egg-info
+*.py[oc]
+.aider*
+.contextr/
+.env
+.idea
+.venv
+__pycache__/
+build/
+dist/
+environment
+logs
+outputs
+uv.lock
+wheels/

@@ -1,0 +1,40 @@
+{
+    "files": [
+        "README.md",
+        "playground\\workflow.py",
+        "pyproject.toml",
+        "src\\llmgine\\__init__.py",
+        "src\\llmgine\\core\\__init__.py",
+        "src\\llmgine\\logging.py",
+        "src\\llmgine\\messages\\bus.py",
+        "src\\llmgine\\messages\\commands.py",
+        "src\\llmgine\\messages\\events.py",
+        "src\\llmgine\\messages\\uow.py",
+        "src\\llmgine\\observability\\__init__.py",
+        "src\\llmgine\\tools.py",
+        "src\\llmgine\\types\\__init__.py",
+        "src\\llmgine\\ui\\__init__.py",
+        "src\\llmgine\\ui\\dispatcher.py",
+        "src\\llmgine\\ui\\textual_ui.py",
+        "src\\llmgine\\workflows\\__init__.py",
+        "src\\llmgine\\workflows\\attachments.py",
+        "src\\llmgine\\workflows\\blocks.py",
+        "src\\llmgine\\workflows\\exceptions.py",
+        "src\\llmgine\\workflows\\handlers.py",
+        "src\\llmgine\\workflows\\workflow.py",
+        "tests\\__init__.py",
+        "tests\\message_bus_test.py",
+        "tests\\workflows\\__init__.py",
+        "tests\\workflows\\block_test.py",
+        "tests\\workflows\\function_block_test.py",
+        "tests\\workflows\\socket_test.py",
+        "tests\\workflows\\workflow_test.py"
+    ],
+    "watched_patterns": [
+        "README.md",
+        "playground",
+        "pyproject.toml",
+        "src",
+        "tests"
+    ]
+}
