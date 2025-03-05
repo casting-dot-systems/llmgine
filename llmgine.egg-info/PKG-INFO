@@ -1,0 +1,14 @@
+Metadata-Version: 2.2
+Name: llmgine
+Version: 0.1.0
+Summary: A unified LLM engine to do anything you can imagine.
+Requires-Python: >=3.13
+Description-Content-Type: text/markdown
+Requires-Dist: graphviz>=0.20.3
+Requires-Dist: litellm>=1.60.8
+Requires-Dist: loguru>=0.7.3
+Requires-Dist: pydantic>=2.10.6
+Requires-Dist: pytest>=8.3.4
+Requires-Dist: rich>=13.9.4
+Requires-Dist: ruff>=0.9.6
+Requires-Dist: textual>=2.1.0
