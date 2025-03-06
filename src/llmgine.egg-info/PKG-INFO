@@ -2,11 +2,368 @@ Metadata-Version: 2.2
 Name: llmgine
 Version: 0.1.0
 Summary: A unified LLM engine to do anything you can imagine.
-Requires-Python: >=3.13
+Home-page: https://github.com/yourusername/llmgine
+Author: LLMgine Team
+Author-email: your.email@example.com
+Requires-Python: >=3.7
 Description-Content-Type: text/markdown
 Requires-Dist: graphviz>=0.20.3
 Requires-Dist: litellm>=1.60.8
 Requires-Dist: loguru>=0.7.3
 Requires-Dist: pydantic>=2.10.6
 Requires-Dist: pytest>=8.3.4
+Requires-Dist: rich>=13.9.4
 Requires-Dist: ruff>=0.9.6
+Requires-Dist: textual>=2.1.0
+Dynamic: author
+Dynamic: author-email
+Dynamic: home-page
+Dynamic: requires-python
+
+# LLMgine
+
+LLMgine is a framework for building LLM-powered applications. It provides a modular architecture for integrating language models, tools, and custom logic into applications.
+
+## Architecture
+
+LLMgine follows an event-driven architecture with the following components:
+
+- **Engine**: The central component that orchestrates all other components
+- **LLM Router**: Routes requests to appropriate LLM providers
+- **Tools**: Reusable functions that can be called by the system
+- **Context**: Manages variables, memory, and chat history
+- **Message Bus**: Communication backbone with event bus and command bus
+- **Observability**: Logging and metrics for monitoring the system
+- **User Interface**: Handles user input and output
+- **Workflows**: Type-safe workflow system for orchestrating multi-step processes
+
+## Workflow System
+
+The workflow system allows you to create structured, type-safe pipelines of operations where LLMs are just one component in a larger system.
+
+### Key Features
+- **Type-safe blocks** with input/output validation
+- **Decision blocks** for conditional branching
+- **Loop blocks** for iterative operations
+- **Visualization** of workflows as graphs
+- Support for both **Deep** and **Wide** execution modes
+
+### Block Types
+- **FunctionBlock**: Basic block that wraps a function
+- **LogicBlock**: Makes decisions and routes to different blocks
+- **LoopBlock**: Executes a function repeatedly until a condition is met
+- **LLMBlock**: Special block for LLM interactions with system prompts and models
+
+## Installation
+
+```bash
+# Clone the repository
+git clone https://github.com/yourusername/llmgine.git
+cd llmgine
+
+# Install the package
+pip install -e .
+```
+
+## Usage
+
+### Basic Engine Usage
+
+```python
+from llmgine import Engine, LLMRouter, ToolManager, ContextManager, MessageBus
+from llmgine.core.llm import DummyLLMProvider
+from llmgine.core.tools import CalculatorTool
+
+# Create an engine
+engine = Engine()
+
+# Register an LLM provider
+engine.llm_router.register_provider(DummyLLMProvider(), is_default=True)
+
+# Register a tool
+engine.tool_manager.register_tool(CalculatorTool())
+
+# Generate text with the LLM
+response = engine.llm_router.generate_text("Hello, world!")
+print(response)  # Output: Echo: Hello, world!
+
+# Execute a tool
+result = engine.tool_manager.execute_tool("calculator", {
+    "operation": "add",
+    "args": [1, 2, 3]
+})
+print(result)  # Output: {'result': 6}
+
+# Store and retrieve variables
+engine.context_manager.set_variable("greeting", "Hello, LLMgine!")
+greeting = engine.context_manager.get_variable("greeting")
+print(greeting)  # Output: Hello, LLMgine!
+```
+
+### Workflow Usage
+
+```python
+from llmgine.workflows.workflow import Workflow, ExecutionMode
+from llmgine.workflows.blocks import (
+    create_function_block, create_logic_block, FunctionBlock
+)
+from enum import Enum
+from dataclasses import dataclass
+from typing import Tuple
+
+# Define data models
+@dataclass
+class NumberInput:
+    value: int
+
+@dataclass
+class ProcessedData:
+    original: int
+    result: int
+
+class Direction(Enum):
+    POSITIVE = "positive"
+    NEGATIVE = "negative"
+    ZERO = "zero"
+
+# Define workflow functions
+def process_number(input_data: NumberInput) -> ProcessedData:
+    return ProcessedData(
+        original=input_data.value,
+        result=input_data.value * 2
+    )
+
+def decide_sign(data: ProcessedData) -> Tuple[None, Direction]:
+    if data.result > 0:
+        return None, Direction.POSITIVE
+    elif data.result < 0:
+        return None, Direction.NEGATIVE
+    else:
+        return None, Direction.ZERO
+
+def handle_positive(data: ProcessedData) -> str:
+    return f"Positive result: +{data.result}"
+
+def handle_negative(data: ProcessedData) -> str:
+    return f"Negative result: {data.result}"
+
+def handle_zero(data: ProcessedData) -> str:
+    return "Result is zero"
+
+# Create workflow
+workflow = Workflow(execution_mode=ExecutionMode.DEEP)
+
+# Create blocks
+process_block = create_function_block(
+    function=process_number,
+    input_schema={"input": NumberInput},
+    output_schema={"output": ProcessedData}
+)
+
+decision_block = create_logic_block(
+    function=decide_sign,
+    input_schema={"data": ProcessedData},
+    route_enum=Direction
+)
+
+positive_block = create_function_block(
+    function=handle_positive,
+    input_schema={"data": ProcessedData},
+    output_schema={"result": str}
+)
+
+negative_block = create_function_block(
+    function=handle_negative,
+    input_schema={"data": ProcessedData},
+    output_schema={"result": str}
+)
+
+zero_block = create_function_block(
+    function=handle_zero,
+    input_schema={"data": ProcessedData},
+    output_schema={"result": str}
+)
+
+# Add blocks to workflow
+workflow.add_block(process_block)
+workflow.add_block(decision_block)
+workflow.add_block(positive_block)
+workflow.add_block(negative_block)
+workflow.add_block(zero_block)
+
+# Set start block
+workflow.set_start_block(process_block)
+
+# Connect blocks
+process_block.connect_head_to_slot("output", decision_block, "data")
+
+# Connect decision routes
+decision_block.connect_route(Direction.POSITIVE, positive_block, "data")
+decision_block.connect_route(Direction.NEGATIVE, negative_block, "data")
+decision_block.connect_route(Direction.ZERO, zero_block, "data")
+
+# Execute workflow
+input_data = NumberInput(value=21)
+process_block.receive_data("input", input_data)
+workflow.queue_block(process_block)
+result = workflow.execute(input_data)
+
+# Print result from the appropriate output block
+if hasattr(positive_block, 'heads') and positive_block.heads.get("result", {}).get("data") is not None:
+    print(positive_block.heads["result"]["data"])  # Output: "Positive result: +42"
+
+# Visualize the workflow
+workflow.visualize("example_workflow", view=True)
+```
+
+### Running the CLI
+
+The package includes a simple command-line interface that demonstrates the framework's capabilities:
+
+```bash
+python -m llmgine
+```
+
+Available commands in the CLI:
+
+- `calc <operation> <arg1> <arg2> ...`: Perform a calculation (add, subtract, multiply, divide)
+- `llm <prompt>`: Send a prompt to the LLM
+- `var <name>=<value>`: Set a variable
+- `get <name>`: Get a variable value
+- `help`: Show help message
+- `exit`: Exit the application
+
+### Creating a Custom LLM Provider
+
+You can implement your own LLM provider by extending the `LLMProvider` abstract base class:
+
+```python
+from llmgine.core.llm import LLMProvider
+from typing import Dict, Any, List
+
+class OpenAIProvider(LLMProvider):
+    def __init__(self, api_key):
+        self.api_key = api_key
+        # Initialize OpenAI client
+        
+    def generate_text(self, prompt: str, parameters: Dict[str, Any]) -> str:
+        # Call OpenAI API
+        # Return the generated text
+        
+    def get_name(self) -> str:
+        return "openai"
+        
+    def get_supported_models(self) -> List[str]:
+        return ["gpt-3.5-turbo", "gpt-4"]
+```
+
+### Creating a Custom Tool
+
+You can implement your own tools by extending the `Tool` abstract base class:
+
+```python
+from llmgine.core.tools import Tool
+from typing import Dict, Any
+
+class WeatherTool(Tool):
+    def __init__(self, api_key):
+        self.api_key = api_key
+        # Initialize weather API client
+        
+    def execute(self, input_data: Dict[str, Any]) -> Dict[str, Any]:
+        location = input_data.get("location")
+        # Call weather API
+        # Return the weather information
+        
+    def get_name(self) -> str:
+        return "weather"
+        
+    def get_description(self) -> str:
+        return "Gets weather information for a location"
+        
+    def get_input_schema(self) -> Dict[str, Any]:
+        return {
+            "type": "object",
+            "properties": {
+                "location": {"type": "string"}
+            },
+            "required": ["location"]
+        }
+        
+    def get_output_schema(self) -> Dict[str, Any]:
+        return {
+            "type": "object",
+            "properties": {
+                "temperature": {"type": "number"},
+                "conditions": {"type": "string"}
+            },
+            "required": ["temperature", "conditions"]
+        }
+```
+
+### Event-Driven Programming
+
+LLMgine uses an event-driven architecture. You can subscribe to events and register command handlers:
+
+```python
+# Subscribe to an event
+engine.message_bus.subscribe_to_event("llm.response", lambda event_data: print(f"LLM response: {event_data}"))
+
+# Register a command handler
+engine.message_bus.register_command_handler("tool.execute", lambda command_data: engine.tool_manager.execute_tool(
+    command_data["tool_name"],
+    command_data["input_data"]
+))
+
+# Publish an event
+engine.message_bus.publish_event("custom.event", {"key": "value"})
+
+# Execute a command
+result = engine.message_bus.execute_command("tool.execute", {
+    "tool_name": "calculator",
+    "input_data": {"operation": "add", "args": [1, 2, 3]}
+})
+```
+
+## Examples
+
+The `examples/` directory contains working code samples demonstrating different features:
+
+- `basic_example.py`: A simple example showing the core engine features
+- `workflow_example.py`: A more complex example demonstrating a weather query workflow with decision blocks
+- `loop_workflow_example.py`: An example showing the Collatz sequence implementation using a loop block
+
+Run the examples with:
+
+```bash
+python examples/basic_example.py
+python examples/workflow_example.py "What's the weather like in Paris tomorrow?"
+python examples/loop_workflow_example.py 27
+```
+
+## Configuration
+
+LLMgine can be configured using a JSON file:
+
+```json
+{
+    "version": "0.1.0",
+    "enable_event_logging": true,
+    "log_file": "llmgine.log",
+    "database_path": "llmgine.db"
+}
+```
+
+Pass the configuration file path when running the CLI:
+
+```bash
+python -m llmgine --config=config.json
+```
+
+## Contributing
+
+Contributions are welcome! Please feel free to submit a Pull Request.
+
+## License
+
+This project is licensed under the MIT License - see the LICENSE file for details. 

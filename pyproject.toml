@@ -23,4 +23,4 @@ dependencies = [
 package-dir = {"llmgine" = "src/llmgine", "tests" = "tests"}
 
 [tool.uv]
-auto-install = true
+preview = true

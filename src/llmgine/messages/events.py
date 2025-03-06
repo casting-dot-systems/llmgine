@@ -18,10 +18,6 @@ class Event(ABC):
     def __post_init__(self):
         if not hasattr(self, 'event_id'):
             self.event_id = str(uuid4())
-
-class BlockEvent(Event):
-
-    
     
 
 
