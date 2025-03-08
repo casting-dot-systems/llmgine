@@ -13,6 +13,24 @@ LLMgine follows an event-driven architecture with the following components:
 - **Message Bus**: Communication backbone with event bus and command bus
 - **Observability**: Logging and metrics for monitoring the system
 - **User Interface**: Handles user input and output
+- **Workflows**: Type-safe workflow system for orchestrating multi-step processes
+
+## Workflow System
+
+The workflow system allows you to create structured, type-safe pipelines of operations where LLMs are just one component in a larger system.
+
+### Key Features
+- **Type-safe blocks** with input/output validation
+- **Decision blocks** for conditional branching
+- **Loop blocks** for iterative operations
+- **Visualization** of workflows as graphs
+- Support for both **Deep** and **Wide** execution modes
+
+### Block Types
+- **FunctionBlock**: Basic block that wraps a function
+- **LogicBlock**: Makes decisions and routes to different blocks
+- **LoopBlock**: Executes a function repeatedly until a condition is met
+- **LLMBlock**: Special block for LLM interactions with system prompts and models
 
 ## Installation
 
@@ -27,7 +45,7 @@ pip install -e .
 
 ## Usage
 
-### Basic Usage
+### Basic Engine Usage
 
 ```python
 from llmgine import Engine, LLMRouter, ToolManager, ContextManager, MessageBus
@@ -58,6 +76,122 @@ print(result)  # Output: {'result': 6}
 engine.context_manager.set_variable("greeting", "Hello, LLMgine!")
 greeting = engine.context_manager.get_variable("greeting")
 print(greeting)  # Output: Hello, LLMgine!
+```
+
+### Workflow Usage
+
+```python
+from llmgine.workflows.workflow import Workflow, ExecutionMode
+from llmgine.workflows.blocks import (
+    create_function_block, create_logic_block, FunctionBlock
+)
+from enum import Enum
+from dataclasses import dataclass
+from typing import Tuple
+
+# Define data models
+@dataclass
+class NumberInput:
+    value: int
+
+@dataclass
+class ProcessedData:
+    original: int
+    result: int
+
+class Direction(Enum):
+    POSITIVE = "positive"
+    NEGATIVE = "negative"
+    ZERO = "zero"
+
+# Define workflow functions
+def process_number(input_data: NumberInput) -> ProcessedData:
+    return ProcessedData(
+        original=input_data.value,
+        result=input_data.value * 2
+    )
+
+def decide_sign(data: ProcessedData) -> Tuple[None, Direction]:
+    if data.result > 0:
+        return None, Direction.POSITIVE
+    elif data.result < 0:
+        return None, Direction.NEGATIVE
+    else:
+        return None, Direction.ZERO
+
+def handle_positive(data: ProcessedData) -> str:
+    return f"Positive result: +{data.result}"
+
+def handle_negative(data: ProcessedData) -> str:
+    return f"Negative result: {data.result}"
+
+def handle_zero(data: ProcessedData) -> str:
+    return "Result is zero"
+
+# Create workflow
+workflow = Workflow(execution_mode=ExecutionMode.DEEP)
+
+# Create blocks
+process_block = create_function_block(
+    function=process_number,
+    input_schema={"input": NumberInput},
+    output_schema={"output": ProcessedData}
+)
+
+decision_block = create_logic_block(
+    function=decide_sign,
+    input_schema={"data": ProcessedData},
+    route_enum=Direction
+)
+
+positive_block = create_function_block(
+    function=handle_positive,
+    input_schema={"data": ProcessedData},
+    output_schema={"result": str}
+)
+
+negative_block = create_function_block(
+    function=handle_negative,
+    input_schema={"data": ProcessedData},
+    output_schema={"result": str}
+)
+
+zero_block = create_function_block(
+    function=handle_zero,
+    input_schema={"data": ProcessedData},
+    output_schema={"result": str}
+)
+
+# Add blocks to workflow
+workflow.add_block(process_block)
+workflow.add_block(decision_block)
+workflow.add_block(positive_block)
+workflow.add_block(negative_block)
+workflow.add_block(zero_block)
+
+# Set start block
+workflow.set_start_block(process_block)
+
+# Connect blocks
+process_block.connect_head_to_slot("output", decision_block, "data")
+
+# Connect decision routes
+decision_block.connect_route(Direction.POSITIVE, positive_block, "data")
+decision_block.connect_route(Direction.NEGATIVE, negative_block, "data")
+decision_block.connect_route(Direction.ZERO, zero_block, "data")
+
+# Execute workflow
+input_data = NumberInput(value=21)
+process_block.receive_data("input", input_data)
+workflow.queue_block(process_block)
+result = workflow.execute(input_data)
+
+# Print result from the appropriate output block
+if hasattr(positive_block, 'heads') and positive_block.heads.get("result", {}).get("data") is not None:
+    print(positive_block.heads["result"]["data"])  # Output: "Positive result: +42"
+
+# Visualize the workflow
+workflow.visualize("example_workflow", view=True)
 ```
 
 ### Running the CLI
@@ -167,6 +301,22 @@ result = engine.message_bus.execute_command("tool.execute", {
     "tool_name": "calculator",
     "input_data": {"operation": "add", "args": [1, 2, 3]}
 })
+```
+
+## Examples
+
+The `examples/` directory contains working code samples demonstrating different features:
+
+- `basic_example.py`: A simple example showing the core engine features
+- `workflow_example.py`: A more complex example demonstrating a weather query workflow with decision blocks
+- `loop_workflow_example.py`: An example showing the Collatz sequence implementation using a loop block
+
+Run the examples with:
+
+```bash
+python examples/basic_example.py
+python examples/workflow_example.py "What's the weather like in Paris tomorrow?"
+python examples/loop_workflow_example.py 27
 ```
 
 ## Configuration
