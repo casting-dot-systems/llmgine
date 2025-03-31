@@ -41,6 +41,7 @@ The MessageBus is responsible for:
 
 - **Command Processing**: Executing commands via registered handlers
 - **Event Publishing**: Distributing events to all interested subscribers
+- **Integrated Observability**: Automatically logging all events to a JSONL file, generating command execution traces, and optionally logging metrics/traces to the console.
 
 ## Event Flow
 

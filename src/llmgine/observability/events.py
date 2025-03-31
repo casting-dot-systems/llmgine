@@ -21,7 +21,7 @@ class LogLevel(Enum):
 
 
 @dataclass
-class BaseEvent:
+class ObservabilityBaseEvent:
     """Base class for all observability events."""
     
     id: str = field(default_factory=lambda: str(uuid.uuid4()))
@@ -30,13 +30,15 @@ class BaseEvent:
 
 
 @dataclass
-class LogEvent(BaseEvent):
+class LogEvent(ObservabilityBaseEvent):
     """Event for logs."""
     
     level: LogLevel = LogLevel.INFO
     message: str = ""
     context: Dict[str, Any] = field(default_factory=dict)
 
+class ToolManagerLogEvent(LogEvent):
+    """Event for tool manager logs."""
 
 @dataclass
 class Metric:
@@ -49,7 +51,7 @@ class Metric:
 
 
 @dataclass
-class MetricEvent(BaseEvent):
+class MetricEvent(ObservabilityBaseEvent):
     """Event for metric reporting."""
     
     metrics: List[Metric] = field(default_factory=list)
@@ -65,7 +67,7 @@ class SpanContext:
 
 
 @dataclass
-class TraceEvent(BaseEvent):
+class TraceEvent(ObservabilityBaseEvent):
     """Event for distributed tracing."""
     
     name: str = ""
@@ -76,3 +78,10 @@ class TraceEvent(BaseEvent):
     attributes: Dict[str, Any] = field(default_factory=dict)
     events: List[Dict[str, Any]] = field(default_factory=list)
     status: str = "OK"
+
+# --- Define EventLogWrapper --- 
+@dataclass(kw_only=True)
+class EventLogWrapper(ObservabilityBaseEvent):
+    """Wraps any other event for generic file logging."""
+    original_event_type: str
+    original_event_data: Dict[str, Any]

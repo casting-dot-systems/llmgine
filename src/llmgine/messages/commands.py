@@ -34,8 +34,8 @@ class SampleCommand(Command):
 class CommandResult:
     """Result of a command execution."""
     
-    command_id: str
     success: bool
+    original_command: Command = field(default_factory=Command)
     result: Any = None
     error: Optional[str] = None
     metadata: Dict[str, Any] = field(default_factory=dict)

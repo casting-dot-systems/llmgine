@@ -1,129 +1,96 @@
-"""File handlers for observability events.
-
-This module provides handlers for logging events to files.
-"""
+"""File handler for logging observability events to JSONL."""
 
 import asyncio
 import json
 import logging
 import os
-from datetime import datetime
-from enum import Enum
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Type
+from typing import Any, Dict, Optional
 
-from dataclasses import asdict
-
-from llmgine.observability.events import BaseEvent
-from llmgine.observability.handlers.base import ObservabilityHandler
+from llmgine.observability.events import ObservabilityBaseEvent, EventLogWrapper
+from llmgine.observability.handlers.base import ObservabilityEventHandler
 
 logger = logging.getLogger(__name__)
 
 
-class JsonFileHandler(ObservabilityHandler[BaseEvent]):
-    """Handler for logging all events to a JSON file."""
+class FileEventHandler(ObservabilityEventHandler):
+    """Logs all received observability events to a JSONL file."""
 
-    def __init__(self, log_dir: str = "logs", filename: Optional[str] = None):
+    def __init__(self, log_dir: str = "logs", filename: Optional[str] = None, **kwargs: Any):
         """Initialize the JSON file handler.
 
         Args:
-            log_dir: Directory to write log files
-            filename: Optional specific filename, if None uses timestamp
+            log_dir: Directory to write log files.
+            filename: Optional specific filename (if None, uses timestamp).
         """
-        super().__init__()
+        super().__init__(**kwargs)
         self.log_dir = Path(log_dir)
-
-        # Create log directory if it doesn't exist
         os.makedirs(self.log_dir, exist_ok=True)
 
-        # Create a log file
         if filename:
             self.log_file = self.log_dir / filename
         else:
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-            self.log_file = self.log_dir / f"llmgine_{timestamp}.jsonl"
+            self.log_file = self.log_dir / f"events_{timestamp}.jsonl"
 
-        # Create a lock for file access
         self._file_lock = asyncio.Lock()
+        logger.info(f"FileEventHandler initialized. Logging events to: {self.log_file}")
 
-        logger.info(f"JsonFileHandler initialized with log file: {self.log_file}")
-
-    def _get_event_type(self) -> Type[BaseEvent]:
-        """Get the event type this handler processes.
-
-        Returns:
-            The BaseEvent class
-        """
-        return BaseEvent
-
-    async def handle(self, event: BaseEvent) -> None:
-        """Handle the event by writing to a JSON file.
-
-        Args:
-            event: The event to handle
-        """
-        if not self.enabled:
+    async def handle(self, event: EventLogWrapper) -> None:
+        """Handle the wrapped event by writing its original data to the log file."""
+        if not isinstance(event, EventLogWrapper):
+            logger.warning(f"FileEventHandler received non-wrapper event: {type(event)}. Skipping.")
             return
 
         try:
-            # Convert the event to a dictionary
-            event_dict = self._event_to_dict(event)
+            log_data = event.original_event_data
+            
+            log_data['wrapper_id'] = event.id
+            log_data['wrapper_timestamp'] = event.timestamp
+            log_data['original_event_type'] = event.original_event_type
 
-            # Add event type to the dictionary
-            event_dict["event_type"] = type(event).__name__
-
-            # Write to file with proper locking to avoid conflicts
             async with self._file_lock:
                 with open(self.log_file, "a") as f:
-                    f.write(json.dumps(event_dict, indent=4) + "\n")
+                    f.write(json.dumps(log_data, default=str, indent=4) + "\n")
         except Exception as e:
-            logger.exception(f"Error writing event to file: {e}")
+            logger.error(f"Error writing wrapped event data to file: {e}", exc_info=True)
 
     def _event_to_dict(self, event: Any) -> Dict[str, Any]:
-        """Convert an event to a dictionary for serialization.
-
-        Args:
-            event: The event to convert
-
-        Returns:
-            Dictionary representation of the event
+        """Convert an event (dataclass or object) to a dictionary for serialization.
+        Handles nested objects, dataclasses, and Enums.
         """
-        if hasattr(event, "__dict__"):
-            # Handle basic attributes
-            result = dict(event.__dict__)
+        if hasattr(event, "to_dict") and callable(event.to_dict):
+            try:
+                return event.to_dict()
+            except Exception:
+                logger.warning(f"Error calling to_dict on {type(event)}", exc_info=True)
+                # Fall through
 
-            # Handle enum values and nested objects
-            for key, value in list(result.items()):
-                if isinstance(value, Enum):
-                    result[key] = value.value
-                elif hasattr(value, "__dict__"):
-                    # Handle nested objects
-                    result[key] = self._event_to_dict(value)
-                elif isinstance(value, list):
-                    # Handle lists of objects
-                    result[key] = [
-                        self._event_to_dict(item) if hasattr(item, "__dict__") else item
-                        for item in value
-                    ]
-
-            return result
-
-        # For dataclasses that don't use __dict__
         try:
-            return asdict(event)
-        except:
-            pass
+            # Use dataclasses.asdict with a factory to handle nested conversion
+            return asdict(event, dict_factory=lambda x: {k: self._convert_value(v) for k, v in x})
+        except TypeError:
+            pass # Not a dataclass
 
-        # Fallback
-        return {"type": str(type(event))}
+        if hasattr(event, "__dict__"):
+            return {k: self._convert_value(v) for k, v in event.__dict__.items()}
 
-    def to_dict(self) -> Dict[str, Any]:
-        """Convert handler to a dictionary for serialization.
+        logger.warning(f"Could not serialize event of type {type(event)} to dict, using repr().")
+        return {"event_repr": repr(event)}
 
-        Returns:
-            Dictionary representation
-        """
-        base_dict = super().to_dict()
-        base_dict["log_dir"] = str(self.log_dir)
-        base_dict["log_file"] = str(self.log_file)
-        return base_dict
+    def _convert_value(self, value: Any) -> Any:
+        """Helper for _event_to_dict to handle nested structures and special types."""
+        if isinstance(value, Enum):
+            return value.value
+        elif isinstance(value, (str, int, float, bool, type(None))):
+            return value
+        elif isinstance(value, dict):
+            return {k: self._convert_value(v) for k, v in value.items()}
+        elif isinstance(value, (list, tuple)):
+            return [self._convert_value(item) for item in value]
+        elif hasattr(value, "__dict__") or hasattr(value, "__dataclass_fields__"):
+             # Recursively convert nested objects/dataclasses
+             return self._event_to_dict(value)
+        else:
+            # Attempt to convert other types to string as a fallback
+            return str(value) 

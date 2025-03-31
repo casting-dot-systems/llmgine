@@ -25,36 +25,23 @@ class Event:
     timestamp: str = field(default_factory=lambda: datetime.now().isoformat())
     metadata: Dict[str, Any] = field(default_factory=dict)
 
-
-@dataclass
-class CommandEvent(Event):
-    """Event emitted when a command starts executing."""
+# @dataclass
+# class LogEvent(Event):
+#     """Event emitted when a log message is created."""
     
-    command_type: str = ""
-    command_id: str = ""
-    command_metadata: Dict[str, Any] = field(default_factory=dict)
+#     message: str = ""
+#     level: str = "info"
+#     metadata: Dict[str, Any] = field(default_factory=dict)
 
 
-@dataclass
-class CommandResultEvent(Event):
-    """Event emitted when a command completes execution."""
-    
-    command_type: str = ""
-    command_id: str = ""
-    success: bool = False
-    result: Any = None
-    error: Optional[str] = None
-    execution_time_ms: Optional[float] = None
-
-
-@dataclass
-class CommandErrorEvent(Event):
-    """Event emitted when a command fails with an error."""
-    
-    command_type: str = ""
-    command_id: str = ""
-    error: str = ""
-    stack_trace: Optional[str] = None
+# @dataclass
+# class CommandResult(Event):
+#     """Result of a command execution."""
+#     original_command: Command = field(default_factory=Command)
+#     success: bool = False
+#     result: Any = None
+#     error: Optional[str] = None
+#     execution_time_ms: Optional[float] = None
 
 
 @dataclass

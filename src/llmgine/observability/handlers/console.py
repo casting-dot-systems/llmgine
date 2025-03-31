@@ -1,119 +1,62 @@
-"""Console handler for observability events.
-
-This module provides handlers for logging events to the console.
-"""
+"""Console handler for printing observability events."""
 
 import logging
-from typing import Any, Dict, Optional, Type
+from typing import Any
 
-from llmgine.observability.events import LogEvent, LogLevel
-from llmgine.observability.handlers.base import ObservabilityHandler
+from llmgine.observability.events import ObservabilityBaseEvent, MetricEvent, TraceEvent
+from llmgine.observability.handlers.base import ObservabilityEventHandler
 
-logger = logging.getLogger(__name__)
+logger = logging.getLogger(__name__) # Use standard logger
 
 
-class ConsoleLogHandler(ObservabilityHandler[LogEvent]):
-    """Handler for logging events to console."""
-    
-    def __init__(self, min_level: LogLevel = LogLevel.INFO):
-        """Initialize the console log handler.
+class ConsoleEventHandler(ObservabilityEventHandler):
+    """Prints a summary of observability events to the console using standard logging."""
+
+    def __init__(self, **kwargs: Any) -> None:
+        super().__init__(**kwargs)
+        # Could add level filtering here if needed
+
+    async def handle(self, event: ObservabilityBaseEvent) -> None:
+        """Process the event and print its representation to the console logger."""
         
-        Args:
-            min_level: Minimum log level to display
-        """
-        super().__init__()
-        self.min_level = min_level
+        # Default representation for unknown event types
+        log_level = logging.INFO
+        message = f"[OBS EVENT] Type={type(event).__name__}, ID={event.id}"
         
-    def _get_event_type(self) -> Type[LogEvent]:
-        """Get the event type this handler processes.
-        
-        Returns:
-            The LogEvent class
-        """
-        return LogEvent
-    
-    async def handle(self, event: LogEvent) -> None:
-        """Handle the log event by writing to console.
-        
-        Args:
-            event: The log event to handle
-        """
-        if not self.enabled:
-            return
+        try:
+            if isinstance(event, MetricEvent):
+                # Special formatting for MetricEvent
+                messages = []
+                for metric in event.metrics:
+                    unit_str = f" {metric.unit}" if metric.unit else ""
+                    tags_str = " " + " ".join(f"{k}={v}" for k, v in metric.tags.items()) if metric.tags else ""
+                    messages.append(f"METRIC {metric.name}={metric.value}{unit_str}{tags_str}")
+                message = f"[OBS EVENT] {', '.join(messages)}"
             
-        # Check if we should log this level
-        if self._should_log_level(event.level):
-            # Map to Python log levels
-            level_map = {
-                LogLevel.DEBUG: logging.DEBUG,
-                LogLevel.INFO: logging.INFO,
-                LogLevel.WARNING: logging.WARNING,
-                LogLevel.ERROR: logging.ERROR,
-                LogLevel.CRITICAL: logging.CRITICAL,
-            }
-            
-            # Get the python logging level
-            python_level = level_map.get(event.level, logging.INFO)
-            
-            # Format the message with context
-            message = self._format_message(event)
-            
-            # Log to the Python logger
-            logger.log(python_level, message)
-    
-    def _should_log_level(self, level: LogLevel) -> bool:
-        """Check if a log level should be displayed.
-        
-        Args:
-            level: The log level to check
-            
-        Returns:
-            True if the level should be logged
-        """
-        # Compare enum values based on severity
-        level_values = {
-            LogLevel.DEBUG: 0,
-            LogLevel.INFO: 1,
-            LogLevel.WARNING: 2,
-            LogLevel.ERROR: 3,
-            LogLevel.CRITICAL: 4
-        }
-        
-        # Get the numerical values
-        event_value = level_values.get(level, 0)
-        min_value = level_values.get(self.min_level, 0)
-        
-        # Should log if event level is >= minimum level
-        return event_value >= min_value
-    
-    def _format_message(self, event: LogEvent) -> str:
-        """Format a log message with context.
-        
-        Args:
-            event: The log event
-            
-        Returns:
-            Formatted message
-        """
-        message = event.message
-        
-        # Add source information if available
-        if event.source:
-            message = f"[{event.source}] {message}"
-            
-        # Add context as key=value pairs
-        if event.context:
-            context_str = " ".join(f"{k}={v}" for k, v in event.context.items())
-            message = f"{message} {context_str}"
-            
-        return message
-    
-    def to_dict(self) -> Dict[str, Any]:
-        """Convert handler to a dictionary for serialization.
-        
-        Returns:
-            Dictionary representation
-        """
-        base_dict = super().to_dict()
-        base_dict["min_level"] = self.min_level.value
-        return base_dict
+            elif isinstance(event, TraceEvent):
+                # Special formatting for TraceEvent (similar to before)
+                if event.start_time and not event.end_time:
+                    message = (
+                        f"TRACE START: {event.name} [trace={event.span_context.trace_id[:8]}] "
+                        f"[span={event.span_context.span_id[:8]}] "
+                        f"(parent={event.span_context.parent_span_id[:8] if event.span_context.parent_span_id else 'None'})"
+                    )
+                elif event.end_time:
+                    duration = f" ({event.duration_ms:.2f}ms)" if event.duration_ms is not None else ""
+                    message = (
+                        f"TRACE END: {event.name} [trace={event.span_context.trace_id[:8]}] "
+                        f"[span={event.span_context.span_id[:8]}] {event.status}{duration}"
+                    )
+                else:
+                     # For trace events that are not start/end (e.g., annotations)
+                     message = f"TRACE EVENT: {event.name} [trace={event.span_context.trace_id[:8]}] [span={event.span_context.span_id[:8]}] Attributes: {event.attributes}"
+
+            # Could add specific formatting for LogEvent here too if desired
+            # elif isinstance(event, LogEvent): ...
+
+        except Exception as e:
+            logger.error(f"Error formatting event in ConsoleEventHandler: {e}", exc_info=True)
+            # Fall back to default message
+
+        # Log the formatted message using the standard logger
+        logger.log(log_level, message) 
