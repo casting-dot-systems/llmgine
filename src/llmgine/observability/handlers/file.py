@@ -96,9 +96,12 @@ class FileEventHandler(ObservabilityEventHandler):
             return {k: self._convert_value(v) for k, v in value.items()}
         elif isinstance(value, (list, tuple)):
             return [self._convert_value(item) for item in value]
-        elif hasattr(value, "__dict__") or hasattr(value, "__dataclass_fields__"):
-            # Recursively convert nested objects/dataclasses
-            return self._event_to_dict(value)
+        elif hasattr(value, "__dataclass_fields__"):
+            # Only handle dataclasses to avoid recursive conversion loops
+            try:
+                return self._event_to_dict(value)
+            except Exception:
+                return str(value)
         else:
-            # Attempt to convert other types to string as a fallback
+            # Fallback for other objects: use string representation to prevent infinite recursion
             return str(value)

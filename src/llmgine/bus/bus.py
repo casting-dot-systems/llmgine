@@ -73,7 +73,7 @@ class MessageBus:
         self._event_queue: Optional[asyncio.Queue] = None
         self._processing_task: Optional[asyncio.Task] = None
         self._observability_handlers: List[ObservabilityEventHandler] = []
-        self._surpress_event_errors: bool = True
+        self._suppress_event_errors: bool = True
         self.event_handler_errors: List[Exception] = []
         logger.info("MessageBus initialized")
         self._initialized = True
@@ -87,8 +87,8 @@ class MessageBus:
         self._event_handlers: Dict[str, Dict[Type[Event], List[AsyncEventHandler]]] = {}
         self._event_queue: Optional[asyncio.Queue] = None
         self._processing_task: Optional[asyncio.Task] = None
+        self._suppress_event_errors: bool = True
         self._observability_handlers: List[ObservabilityEventHandler] = []
-        self._surpress_event_errors: bool = True
         self.event_handler_errors: List[Exception] = []
         logger.info("MessageBus reset")
 
@@ -96,20 +96,18 @@ class MessageBus:
         """
         Surpress errors during event handling.
         """
-        self._surpress_event_errors = True
+        self._suppress_event_errors = True
 
     def unsuppress_event_errors(self) -> None:
         """
         Unsupress errors during event handling.
         """
-        self._surpress_event_errors = False
+        self._suppress_event_errors = False
 
-    def register_observability_handler(self, handler: ObservabilityEventHandler) -> None:
         """
         Register an observability handler for this message bus.
         Registers the handler for both general and specific observability events.
         """
-        self._observability_handlers.append(handler)
 
     def create_session(self, id_input: Optional[str] = None) -> BusSession:
         """
@@ -159,6 +157,12 @@ class MessageBus:
         else:
             logger.info("MessageBus already stopped or never started")
 
+    def register_observability_handler(self, handler: ObservabilityEventHandler) -> None:
+        """
+        Register an observability handler for a specific session.
+        """
+        self._observability_handlers.append(handler)
+
     def register_command_handler(
         self,
         command_type: Type[TCommand],
@@ -183,12 +187,12 @@ class MessageBus:
 
         if command_type in self._command_handlers[session_id]:
             raise ValueError(
-                f"Command handler for {command_type.__name__} already registered in session {session_id}"
+                f"Command handler for {command_type} already registered in session {session_id}"
             )
 
         self._command_handlers[session_id][command_type] = async_handler
         logger.debug(
-            f"Registered command handler for {command_type.__name__} in session {session_id}"
+            f"Registered command handler for {command_type} in session {session_id}"
         )  # TODO test
 
     def register_event_handler(
@@ -211,9 +215,7 @@ class MessageBus:
 
         async_handler = self._wrap_handler_as_async(handler)
         self._event_handlers[session_id][event_type].append(async_handler)
-        logger.debug(
-            f"Registered event handler for {event_type.__name__} in session {session_id}"
-        )
+        logger.debug(f"Registered event handler for {event_type} in session {session_id}")
 
     def unregister_session_handlers(self, session_id: str) -> None:
         """
@@ -254,7 +256,7 @@ class MessageBus:
             if command_type in self._command_handlers[session_id]:
                 del self._command_handlers[session_id][command_type]
                 logger.debug(
-                    f"Unregistered command handler for {command_type.__name__} in session {session_id}"
+                    f"Unregistered command handler for {command_type} in session {session_id}"
                 )
         else:
             raise ValueError(
@@ -274,7 +276,7 @@ class MessageBus:
             if event_type in self._event_handlers[session_id]:
                 del self._event_handlers[session_id][event_type]
                 logger.debug(
-                    f"Unregistered event handler for {event_type.__name__} in session {session_id}"
+                    f"Unregistered event handler for {event_type} in session {session_id}"
                 )
         else:
             raise ValueError(f"No event handlers to unregister for session {session_id}")
@@ -401,7 +403,7 @@ class MessageBus:
                 if event_type in self._event_handlers["ROOT"]:
                     handlers.extend(self._event_handlers["ROOT"][event_type])
                     logger.warning(
-                        f"Defaulting to ROOT event handler for {event_type.__name__} in session {event.session_id}"
+                        f"Defaulting to ROOT event handler for {event_type} in session {event.session_id}"
                     )
 
         # handle root handlers
@@ -414,23 +416,31 @@ class MessageBus:
             if event_type in self._event_handlers["GLOBAL"]:
                 handlers.extend(self._event_handlers["GLOBAL"][event_type])
             logger.info(
-                f"Using GLOBAL event handlers {self._event_handlers['GLOBAL']} for {event_type.__name__} in session{event.session_id}"
+                f"Using GLOBAL event handlers {self._event_handlers['GLOBAL']} for {event_type} in session{event.session_id}"
             )
 
         if not handlers:
-            logger.warning(f"No handler registered for event type {event_type.__name__}")
-            return
+            logger.debug(
+                f"No non-observability handler registered for event type {event_type}"
+            )
 
         for handler in self._observability_handlers:
+            logger.debug(
+                f"Dispatching event {event_type} in session {event.session_id} to observability handler {handler.__class__.__name__}"
+            )
             try:
                 await handler.handle(event)
             except Exception as e:
                 logger.exception(
-                    f"Error in observability handler {handler.__name__}: {e} for event {event_type.__name__} in session {event.session_id}"
+                    f"Error in observability handler {handler.__name__}: {e}"
                 )
+                if not self._suppress_event_errors:
+                    raise e
+                else:
+                    self.event_handler_errors.append(e)
 
         logger.debug(
-            f"Dispatching event {event_type.__name__} in session {event.session_id} to {len(handlers)} handlers"
+            f"Dispatching event {event_type} in session {event.session_id} to {len(handlers)} handlers"
         )
         tasks = [asyncio.create_task(handler(event)) for handler in handlers]
         results = await asyncio.gather(*tasks, return_exceptions=True)
@@ -439,9 +449,9 @@ class MessageBus:
                 self.event_handler_errors.append(result)
                 handler_name = getattr(handlers[i], "__qualname__", repr(handlers[i]))
                 logger.exception(
-                    f"Error in handler '{handler_name}' for {event_type.__name__}: {result}"
+                    f"Error in handler '{handler_name}' for {event_type}: {result}"
                 )
-                if not self._surpress_event_errors:
+                if not self._suppress_event_errors:
                     raise result
                 else:
                     await self.publish(
@@ -467,66 +477,3 @@ class MessageBus:
         async_wrapper.function = handler
 
         return async_wrapper
-
-    # TODO: move to utils
-    def _event_to_dict(self, event: Any) -> Dict[str, Any]:
-        """
-        Convert an event to a dictionary for serialization.
-        Tries custom to_dict, dataclasses.asdict, __dict__, or falls back to repr.
-        Args:
-            event: The event object to serialize.
-        Returns:
-            A dictionary representation of the event.
-        """
-        if hasattr(event, "to_dict") and callable(event.to_dict):
-            try:
-                return event.to_dict()
-            except Exception:
-                logger.warning(f"Error calling to_dict on {type(event)}", exc_info=True)
-
-        try:
-            return asdict(
-                event, dict_factory=lambda x: {k: self._convert_value(v) for k, v in x}
-            )
-        except TypeError:
-            pass
-
-        if hasattr(event, "__dict__"):
-            return {
-                k: self._convert_value(v)
-                for k, v in event.__dict__.items()
-                if not k.startswith("_")
-            }
-
-        logger.warning(f"Could not serialize {type(event)} to dict, using repr()")
-        return {"event_repr": repr(event)}
-
-    # TODO: move to utils
-    def _convert_value(self, value: Any) -> Any:
-        """
-        Convert values for serialization, handling enums, containers, and objects.
-        Args:
-            value: The value to convert.
-        Returns:
-            A serializable representation of the value.
-        """
-        if isinstance(value, Enum):
-            return value.value
-        elif isinstance(value, (str, int, float, bool, type(None))):
-            return value
-        elif isinstance(value, dict):
-            return {str(k): self._convert_value(v) for k, v in value.items()}
-        elif isinstance(value, (list, tuple, set)):
-            return [self._convert_value(item) for item in value]
-        elif hasattr(value, "to_dict") and callable(value.to_dict):
-            try:
-                return value.to_dict()
-            except Exception:
-                pass
-        elif hasattr(value, "__dict__") or hasattr(value, "__dataclass_fields__"):
-            return self._event_to_dict(value)
-        else:
-            try:
-                return str(value)
-            except Exception:
-                return repr(value)

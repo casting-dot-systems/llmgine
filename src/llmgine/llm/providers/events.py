@@ -7,14 +7,14 @@ from llmgine.messages.events import Event
 
 @dataclass
 class LLMResponseEvent(Event):
-    llm_manager_id: str = ""
-    engine_id: str = ""
+    call_id: str = ""
     raw_response: Dict[str, Any] = field(default_factory=dict)
+    error: Exception = None
+
 
 @dataclass
 class LLMCallEvent(Event):
-    model_id: str = None
+    model_id: str = ""
+    call_id: str = ""
     provider: Providers = None
     payload: Dict[str, Any] = field(default_factory=dict)
-    
-    

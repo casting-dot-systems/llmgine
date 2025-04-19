@@ -1,7 +1,10 @@
 """OpenAI provider implementation."""
 
 from typing import Any, Dict, List, Literal, Optional, Union
+import uuid
 
+from llmgine.llm.providers.events import LLMCallEvent, LLMResponseEvent
+from llmgine.llm.providers.providers import Providers
 from openai import AsyncOpenAI
 from openai.types.chat import ChatCompletion
 
@@ -52,8 +55,11 @@ class OpenAIResponse(LLMResponse):
 
 
 class OpenAIProvider(LLMProvider):
-    def __init__(self, api_key: str, model: str) -> None:
+    def __init__(
+        self, api_key: str, model: str, model_component_id: Optional[str] = None
+    ) -> None:
         self.model = model
+        self.model_component_id = model_component_id
         self.base_url = "https://api.openai.com/v1"
         self.client = AsyncOpenAI(api_key=api_key, base_url=self.base_url)
         self.bus = MessageBus()
@@ -71,7 +77,7 @@ class OpenAIProvider(LLMProvider):
         test: bool = False,
         **kwargs: Any,
     ) -> LLMResponse:
-        # id = str(uuid.uuid4())
+        call_id = str(uuid.uuid4())
 
         # construct the payload
         payload = {
@@ -88,8 +94,8 @@ class OpenAIProvider(LLMProvider):
 
             if tool_choice:
                 payload["tool_choice"] = tool_choice
-                
-            if parallel_tool_calls:
+
+            if parallel_tool_calls is not None:
                 payload["parallel_tool_calls"] = parallel_tool_calls
 
         if response_format:
@@ -99,13 +105,29 @@ class OpenAIProvider(LLMProvider):
             payload["reasoning_effort"] = reasoning_effort
 
         payload.update(**kwargs)
-        # self.bus.emit(LLMCallEvent(id=id, provider=Providers.OPENAI, payload=payload))
+        call_event = LLMCallEvent(
+            call_id=call_id,
+            model_id=self.model_component_id,
+            provider=Providers.OPENAI,
+            payload=payload,
+        )
+        await self.bus.publish(call_event)
         try:
             response = await self.client.chat.completions.create(**payload)
         except Exception as e:
-            # self.bus.emit(LLMResponseEvent(call_id=id, provider=Providers.OPENAI, response=e))
+            await self.bus.publish(
+                LLMResponseEvent(
+                    call_id=call_id,
+                    error=e,
+                )
+            )
             raise e
-        # self.bus.emit(LLMResponseEvent(call_id=id, provider=Providers.OPENAI, response=response))
+        await self.bus.publish(
+            LLMResponseEvent(
+                call_id=call_id,
+                raw_response=response,
+            )
+        )
         if test:
             return response
         else:

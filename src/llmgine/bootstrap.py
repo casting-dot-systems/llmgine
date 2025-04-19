@@ -92,47 +92,6 @@ class ApplicationBootstrap(Generic[TConfig]):
         # --- Initialize MessageBus (now takes no args) ---
         self.message_bus = MessageBus()
 
-        # --- Instantiate and Register Handlers based on Config ---
-        self._register_observability_handlers()
-
-    def _register_observability_handlers(self) -> None:
-        """Instantiate and register observability handlers based on config."""
-
-        console_handler = None
-        file_handler = None
-
-        # Standard Console Handler
-        if getattr(self.config, "enable_console_handler", True):
-            console_handler = ConsoleEventHandler()
-            logger.info("ConsoleEventHandler enabled.")
-
-        # Standard File Handler
-        if getattr(self.config, "enable_file_handler", True):
-            log_dir = getattr(self.config, "file_handler_log_dir", "logs")
-            log_filename = getattr(self.config, "file_handler_log_filename", None)
-            file_handler = FileEventHandler(log_dir=log_dir, filename=log_filename)
-            logger.info(
-                f"FileEventHandler enabled (dir={log_dir}, file={log_filename or 'timestamped'})."
-            )
-
-        # Custom Handlers registration would go here
-
-        # Register Console Handler for BaseEvent (to see original obs events)
-        if console_handler:
-            logger.info("Registering ConsoleEventHandler for BaseEvent.")
-            # Use the global session for observability handlers
-            self.message_bus.register_observability_handler(console_handler)
-
-        # Register File Handler for EventLogWrapper (to log wrapped events)
-        if file_handler:
-            # Use the global session for observability handlers
-            self.message_bus.register_observability_handler(file_handler)
-
-        if not console_handler and not file_handler:
-            logger.warning(
-                "No standard observability handlers were configured or registered."
-            )
-
     async def bootstrap(self) -> None:
         """Bootstrap the application.
 
@@ -146,6 +105,7 @@ class ApplicationBootstrap(Generic[TConfig]):
         await self.message_bus.start()
 
         # Register command and event handlers
+        self._register_observability_handlers()
         self._register_command_handlers()
         self._register_event_handlers()
 
@@ -165,6 +125,13 @@ class ApplicationBootstrap(Generic[TConfig]):
         logger.info(
             "Application shutdown complete", extra={"component": "ApplicationBootstrap"}
         )
+
+    def _register_observability_handlers(self) -> None:
+        """Register observability handlers with the message bus."""
+        if self.config.enable_console_handler:
+            self.message_bus.register_observability_handler(ConsoleEventHandler())
+        if self.config.enable_file_handler:
+            self.message_bus.register_observability_handler(FileEventHandler())
 
     def _register_command_handlers(self) -> None:
         """Register command handlers with the message bus.

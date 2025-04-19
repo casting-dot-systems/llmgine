@@ -54,11 +54,6 @@ class BusSession:
 
     async def __aenter__(self):
         """Start the session and publish a session start event."""
-        # Import here to avoid circular import
-        from llmgine.bus.bus import current_session_id
-
-        # Set the session_id in the context var so it's available for all operations within this context
-        self._token = current_session_id.set(self.session_id)
 
         # Publish a session start event and await it
         await self.bus.publish(SessionStartEvent(session_id=self.session_id))
@@ -80,12 +75,6 @@ class BusSession:
             await self.bus.publish(end_event)
 
         finally:
-            # Reset the context var
-            from llmgine.bus.bus import current_session_id
-
-            if hasattr(self, "_token"):
-                current_session_id.reset(self._token)
-
             # Ensure the session is marked inactive even if cleanup fails
             self._active = False
 
