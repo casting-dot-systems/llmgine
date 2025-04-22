@@ -5,11 +5,12 @@ from typing import Any, Dict, List, Optional
 
 from llmgine.bus.bus import MessageBus
 from llmgine.llm.context.memory import SimpleChatHistory
-from llmgine.llm.providers.response import OpenAIManager
+from llmgine.llm.models.openai_models import Gpt_4o_Mini_Latest
+from llmgine.llm.providers.providers import Providers
 from llmgine.llm.tools.tool_manager import ToolManager
 from llmgine.llm.tools.types import ToolCall
 from llmgine.messages.commands import Command, CommandResult
-from llmgine.messages.events import LLMResponse, Event
+from llmgine.messages.events import Event
 from dataclasses import dataclass, field
 
 
@@ -19,6 +20,13 @@ class PromptCommand(Command):
         self.message = message
         self.session_id = session_id
         self.tools = tools
+
+
+@dataclass
+class DisplayStatusEvent(Event):
+    """Event emitted when the status of the engine changes."""
+
+    status: str = ""
 
 
 @dataclass
@@ -86,9 +94,7 @@ class ToolChatEngine:
         self.context_manager = SimpleChatHistory(
             engine_id=self.engine_id, session_id=self.session_id
         )
-        self.llm_manager = OpenAIManager(
-            engine_id=self.engine_id, session_id=self.session_id
-        )
+        self.llm_manager = Gpt_4o_Mini_Latest(Providers.OPENAI)
         self.tool_manager = ToolManager(
             engine_id=self.engine_id, session_id=self.session_id, llm_model_name="openai"
         )
@@ -114,23 +120,29 @@ class ToolChatEngine:
         try:
             # 1. Add user message to history
             self.context_manager.store_string(command.message, "user")
+            # Publish event to update CLI
+            await self.message_bus.publish(
+                DisplayStatusEvent(
+                    f"Processing command: {command.message}.", session_id=self.session_id
+                ),
+            )
 
             # Loop for potential tool execution cycles
             while True:
                 # 2. Get current context (including latest user message or tool results)
-                current_context = self.context_manager.retrieve()
+                current_context = await self.context_manager.retrieve()
 
                 # 3. Get available tools
                 tools = await self.tool_manager.get_tools()
 
                 # 4. Call LLM
-                print(
-                    f"\nCalling LLM with context:\n{json.dumps(current_context, indent=2)}\n"
-                )  # Debug print
+                # print(
+                #     f"\nCalling LLM with context:\n{json.dumps(current_context, indent=2)}\n"
+                # )  # Debug print
                 response = await self.llm_manager.generate(
-                    context=current_context, tools=tools
+                    messages=current_context, tools=tools
                 )
-                print(f"\nLLM Raw Response:\n{response.raw}\n")  # Debug print
+                # print(f"\nLLM Raw Response:\n{response.raw}\n")  # Debug print
 
                 # 5. Extract the first choice's message object
                 # Important: Access the underlying OpenAI object structure
@@ -138,22 +150,21 @@ class ToolChatEngine:
 
                 # 6. Add the *entire* assistant message object to history.
                 # This is crucial for context if it contains tool_calls.
-                self.context_manager.store_assistant_message(response_message)
+                await self.context_manager.store_assistant_message(response_message)
 
                 # 7. Check for tool calls
                 if not response_message.tool_calls:
                     # No tool calls, break the loop and return the content
                     final_content = response_message.content or ""
+
+                    # Notify status complete
                     await self.message_bus.publish(
-                        PromptResponseEvent(
-                            prompt=command.message,
-                            response=final_content,
-                            tool_calls=None,  # No tool calls in the final response
-                            session_id=self.session_id,
+                        DisplayStatusEvent(
+                            status="Response ready", session_id=self.session_id
                         )
                     )
                     return CommandResult(
-                        success=True, original_command=command, result=final_content
+                        success=True, result=final_content, session_id=self.session_id
                     )
 
                 # 8. Process tool calls
@@ -217,7 +228,7 @@ class ToolChatEngine:
 
             traceback.print_exc()  # Print stack trace
 
-            return CommandResult(success=False, original_command=command, error=str(e))
+            return CommandResult(success=False, error=str(e), session_id=self.session_id)
 
     async def register_tool(self, function):
         """Register a function as a tool.

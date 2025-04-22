@@ -40,8 +40,8 @@ def setup_basic_logging(level: LogLevel = LogLevel.INFO):
 
     # Configure logging with session_id support
     logging.basicConfig(
-        level=logging_level,
-        format="%(asctime)s - %(name)s - %(levelname)s - [%(session_id)s] %(message)s",
+        level=logging.ERROR,
+        format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
         # stream=sys.stdout # Optionally direct to stdout instead of stderr
     )
 

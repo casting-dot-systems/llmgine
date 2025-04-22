@@ -97,7 +97,7 @@ class ToolEngine:
             # Loop for potential tool execution cycles
             while True:
                 # 2. Get current context (including latest user message or tool results)
-                current_context = self.context_manager.retrieve()
+                current_context = await self.context_manager.retrieve()
 
                 # 3. Get available tools
                 tools = await self.tool_manager.get_tools()
@@ -113,7 +113,7 @@ class ToolEngine:
 
                 # 6. Add the *entire* assistant message object to history.
                 # This is crucial for context if it contains tool_calls.
-                self.context_manager.store_assistant_message(response_message)
+                await self.context_manager.store_assistant_message(response_message)
 
                 # 7. Check for tool calls
                 if not response_message.tool_calls:

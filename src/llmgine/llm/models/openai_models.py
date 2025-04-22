@@ -112,7 +112,7 @@ class Gpt41Mini:
         )
 
 
-class Gpt_4o_Mini_Latest(Model):
+class Gpt_4o_Mini_Latest:
     """
     The latest GPT-4o Mini model.
     """

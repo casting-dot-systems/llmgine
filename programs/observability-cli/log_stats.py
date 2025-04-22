@@ -1,239 +1,342 @@
 #!/usr/bin/env python3
-import argparse
-import sys
+"""
+Statistics generator for LLMgine event logs.
+"""
+import json
+from collections import Counter, defaultdict
+from datetime import datetime
 from pathlib import Path
-from datetime import datetime, timedelta
+from typing import Dict, List, Optional, Tuple
+
+import rich.box
 from rich.console import Console
-from rich.table import Table
 from rich.panel import Panel
+from rich.table import Table
 from rich.text import Text
-from rich.layout import Layout
-
-# Make sure we can import log_parser.py from the same directory
-sys.path.insert(0, str(Path(__file__).parent))
-import log_parser
-
-console = Console()
 
 
-def parse_args():
-    parser = argparse.ArgumentParser(
-        description="Generate statistics and metrics from logs."
-    )
-    parser.add_argument("log_file", type=str, help="Path to log file")
-    parser.add_argument(
-        "--time-window",
-        "-t",
-        type=int,
-        default=60,
-        help="Time window in seconds for rate calculation",
-    )
-    parser.add_argument(
-        "--top-n", "-n", type=int, default=10, help="Show top N items in each category"
-    )
-    return parser.parse_args()
+class LogStats:
+    """Generate statistics from LLMgine event logs."""
 
-
-def generate_stats(args):
-    # Load logs
-    logs = log_parser.load_logs(args.log_file)
-    console.print(f"[bold]Loaded [green]{len(logs)}[/green] log entries[/bold]")
-
-    # Calculate metrics
-    metrics = log_parser.calculate_metrics(logs)
-
-    # Header
-    header_text = Text()
-    header_text.append("\n📊 Log Statistics Summary\n", style="bold blue")
-    header_text.append(f"Total logs: {metrics['total_logs']}", style="green")
-    console.print(header_text)
-
-    # Calculate log rate over time
-    log_times = [datetime.fromisoformat(log["timestamp"]) for log in logs]
-    log_times.sort()
-
-    if log_times:
-        start_time = log_times[0]
-        end_time = log_times[-1]
-        duration = (end_time - start_time).total_seconds()
-        overall_rate = len(logs) / duration if duration > 0 else 0
-
-        # Calculate rates in time windows
-        window_rates = []
-        current_time = start_time
-        while current_time <= end_time:
-            window_end = current_time + timedelta(seconds=args.time_window)
-            window_logs = [
-                log
-                for log in logs
-                if current_time <= datetime.fromisoformat(log["timestamp"]) < window_end
-            ]
-            window_rates.append((current_time, len(window_logs) / args.time_window))
-            current_time = window_end
-
-        # Create rate panel with simple bars
-        rate_lines = []
-        if window_rates:
-            max_rate = max(rate for _, rate in window_rates)
-
-            # Only take the last 10 windows to show recent activity
-            display_rates = window_rates[-10:] if len(window_rates) > 10 else window_rates
-
-            for time, rate in display_rates:
-                bar_width = 40
-                filled_width = int((rate / max_rate) * bar_width) if max_rate > 0 else 0
-                bar = f"[{'=' * filled_width}{' ' * (bar_width - filled_width)}]"
-                rate_lines.append(f"{time.strftime('%H:%M:%S')} {bar} {rate:.2f}/s")
-
-        rate_text = "\n".join(rate_lines)
-        console.print(
-            Panel(
-                f"Overall rate: [bold green]{overall_rate:.2f}[/bold green] logs/second over "
-                f"[bold]{duration:.1f}[/bold] seconds\n\n{rate_text}",
-                title=f"📈 Log Rate (per {args.time_window}s window)",
-                expand=False,
+    def __init__(self, log_file: Path, console: Optional[Console] = None):
+        """Initialize the log stats generator.
+        
+        Args:
+            log_file: Path to the event log file
+            console: Rich console instance (optional)
+        """
+        self.log_file = log_file
+        self.console = console or Console()
+        self.events: List[Dict] = []
+        self.sessions = set()
+        self.event_types = Counter()
+        self.session_stats: Dict[str, Dict] = {}
+        
+        # Load events
+        self.load_events()
+        self.calculate_stats()
+        
+    def load_events(self) -> None:
+        """Load events from the log file."""
+        self.events = []
+        
+        # Read all content to handle multi-line JSON properly
+        with open(self.log_file, "r") as f:
+            content = f.read()
+            
+        # Split by closing brace followed by an opening brace (with possible whitespace)
+        # This is to handle both single-line and multi-line JSON objects
+        json_objects = []
+        current_obj = ""
+        for line in content.split("\n"):
+            current_obj += line
+            if line.strip() == "}":
+                json_objects.append(current_obj)
+                current_obj = ""
+        
+        # Parse each JSON object
+        for json_str in json_objects:
+            if not json_str.strip():
+                continue
+                
+            try:
+                event = json.loads(json_str)
+                # Skip entries that don't have event_type
+                if "event_type" not in event:
+                    continue
+                    
+                self.events.append(event)
+            except json.JSONDecodeError:
+                # Try to fix common issues with the JSON
+                try:
+                    # Try adding missing closing braces
+                    fixed_str = json_str
+                    while fixed_str.count("{") > fixed_str.count("}"):
+                        fixed_str += "}"
+                    event = json.loads(fixed_str)
+                    
+                    # Skip entries that don't have event_type
+                    if "event_type" not in event:
+                        continue
+                        
+                    self.events.append(event)
+                except json.JSONDecodeError:
+                    # Just skip problematic objects silently
+                    continue
+    
+    def calculate_stats(self) -> None:
+        """Calculate statistics from the loaded events."""
+        for event in self.events:
+            event_type = event.get("event_type", "Unknown")
+            session_id = event.get("session_id", "Unknown")
+            timestamp = event.get("timestamp", "")
+            
+            # Count event types
+            self.event_types[event_type] += 1
+            
+            # Track unique sessions
+            self.sessions.add(session_id)
+            
+            # Calculate session-specific stats
+            if session_id not in self.session_stats:
+                self.session_stats[session_id] = {
+                    "start_time": timestamp,
+                    "end_time": timestamp,
+                    "event_count": 1,
+                    "event_types": Counter({event_type: 1}),
+                    "duration": 0,
+                }
+            else:
+                self.session_stats[session_id]["end_time"] = timestamp
+                self.session_stats[session_id]["event_count"] += 1
+                self.session_stats[session_id]["event_types"][event_type] += 1
+        
+        # Calculate session durations
+        for sid, stats in self.session_stats.items():
+            try:
+                start = datetime.fromisoformat(stats["start_time"])
+                end = datetime.fromisoformat(stats["end_time"])
+                duration = (end - start).total_seconds()
+                self.session_stats[sid]["duration"] = duration
+            except (ValueError, TypeError):
+                pass
+    
+    def print_summary(self) -> None:
+        """Print a summary of the log statistics."""
+        total_events = len(self.events)
+        total_sessions = len(self.sessions)
+        
+        panel = Panel(
+            f"[bold]Log Summary[/bold]\n\n"
+            f"Total Events: {total_events}\n"
+            f"Total Sessions: {total_sessions}\n"
+            f"Event Types: {len(self.event_types)}\n"
+            f"Log File: {self.log_file}",
+            title="LLMgine Log Statistics",
+            border_style="blue"
+        )
+        
+        self.console.print(panel)
+    
+    def print_event_type_distribution(self) -> None:
+        """Print the distribution of event types."""
+        table = Table(title="Event Type Distribution", box=rich.box.ROUNDED)
+        table.add_column("Event Type", style="cyan")
+        table.add_column("Count", style="magenta")
+        table.add_column("Percentage", style="green")
+        
+        for event_type, count in self.event_types.most_common():
+            percentage = (count / len(self.events)) * 100
+            table.add_row(
+                event_type,
+                str(count),
+                f"{percentage:.1f}%"
             )
+            
+        self.console.print(table)
+    
+    def print_session_stats(self, limit: int = 10) -> None:
+        """Print statistics for each session.
+        
+        Args:
+            limit: Maximum number of sessions to display
+        """
+        table = Table(title="Session Statistics", box=rich.box.ROUNDED)
+        table.add_column("Session ID", style="cyan")
+        table.add_column("Duration", style="green")
+        table.add_column("Events", style="magenta")
+        table.add_column("Top Event Type", style="yellow")
+        
+        # Sort sessions by event count
+        sorted_sessions = sorted(
+            self.session_stats.items(),
+            key=lambda x: x[1]["event_count"],
+            reverse=True
         )
-
-    # Log levels table
-    levels_table = Table(title="📋 Log Levels", show_header=True, header_style="bold")
-    levels_table.add_column("Level", style="dim")
-    levels_table.add_column("Count", justify="right")
-    levels_table.add_column("Percentage", justify="right")
-    levels_table.add_column("Distribution", width=30)
-
-    # Create a progress bar for each level
-    total_logs = metrics["total_logs"]
-    for level, count in sorted(
-        metrics["log_levels"].items(), key=lambda x: x[1], reverse=True
-    ):
-        if not level:
-            continue
-        percentage = count / total_logs * 100
-        level_style = {
-            "INFO": "green",
-            "DEBUG": "blue",
-            "WARNING": "yellow",
-            "ERROR": "red",
-        }.get(level, "white")
-
-        # Create a simple progress bar
-        bar_width = 30
-        filled_width = int((count / total_logs) * bar_width)
-        bar = f"[{level_style}]{'█' * filled_width}[/{level_style}]{' ' * (bar_width - filled_width)}"
-
-        levels_table.add_row(
-            Text(level, style=level_style), str(count), f"{percentage:.1f}%", bar
-        )
-
-    console.print(levels_table)
-
-    # Event types table
-    event_types_table = Table(
-        title="🔄 Event Types", show_header=True, header_style="bold"
-    )
-    event_types_table.add_column("Event Type", style="dim")
-    event_types_table.add_column("Count", justify="right")
-    event_types_table.add_column("Percentage", justify="right")
-
-    for event_type, count in sorted(
-        metrics["event_types"].items(), key=lambda x: x[1], reverse=True
-    ):
-        if not event_type:
-            continue
-        percentage = count / total_logs * 100
-        event_types_table.add_row(event_type, str(count), f"{percentage:.1f}%")
-
-    console.print(event_types_table)
-
-    # Components table
-    components_table = Table(title="🧩 Components", show_header=True, header_style="bold")
-    components_table.add_column("Component", style="dim")
-    components_table.add_column("Count", justify="right")
-    components_table.add_column("Percentage", justify="right")
-
-    for component, count in sorted(
-        metrics["components"].items(), key=lambda x: x[1], reverse=True
-    )[: args.top_n]:
-        if not component:
-            continue
-        percentage = count / total_logs * 100
-        components_table.add_row(component, str(count), f"{percentage:.1f}%")
-
-    console.print(components_table)
-
-    # Traces table
-    traces_table = Table(
-        title=f"🔍 Top {args.top_n} Traces", show_header=True, header_style="bold"
-    )
-    traces_table.add_column("Trace ID", style="dim", width=36)
-    traces_table.add_column("Spans", justify="right")
-    traces_table.add_column("Status", width=30)
-
-    # Sort traces by span count
-    sorted_traces = sorted(
-        metrics["traces"].items(), key=lambda x: x[1]["span_count"], reverse=True
-    )[: args.top_n]
-
-    for trace_id, trace_info in sorted_traces:
-        status_text = ""
-        for status, count in trace_info["status"].items():
-            status_style = {
-                "OK": "green",
-                "success": "green",
-                "warning": "yellow",
-                "error": "red",
-            }.get(status, "white")
-            status_text += f"[{status_style}]{status}: {count}[/{status_style}] "
-
-        traces_table.add_row(
-            trace_id, str(trace_info["span_count"]), Text.from_markup(status_text)
-        )
-
-    console.print(traces_table)
-
-    # Warnings and errors
-    if metrics["warnings"]:
-        warnings_text = "\n".join([
-            f"[yellow]{log_parser.extract_time_part(w['timestamp'])}[/yellow] "
-            f"[yellow bold]{w['source'].split('/')[-1] if w['source'] else ''}:[/yellow bold] {w['message']}"
-            for w in metrics["warnings"][:5]
-        ])
-        console.print(
-            Panel(
-                warnings_text,
-                title=f"⚠️ Recent Warnings ({len(metrics['warnings'])} total)",
-                style="yellow",
+        
+        for i, (sid, stats) in enumerate(sorted_sessions):
+            if i >= limit:
+                break
+                
+            # Format duration
+            duration = stats["duration"]
+            if duration > 60:
+                duration_str = f"{duration / 60:.1f} min"
+            else:
+                duration_str = f"{duration:.1f} sec"
+                
+            # Get top event type
+            top_event = stats["event_types"].most_common(1)
+            top_event_str = f"{top_event[0][0]} ({top_event[0][1]})" if top_event else "N/A"
+            
+            table.add_row(
+                sid,
+                duration_str,
+                str(stats["event_count"]),
+                top_event_str
             )
-        )
-
-    if metrics["errors"]:
-        errors_text = "\n".join([
-            f"[red]{log_parser.extract_time_part(e['timestamp'])}[/red] "
-            f"[red bold]{e['source'].split('/')[-1] if e['source'] else ''}:[/red bold] {e['message']}"
-            for e in metrics["errors"][:5]
-        ])
-        console.print(
-            Panel(
-                errors_text,
-                title=f"🔴 Recent Errors ({len(metrics['errors'])} total)",
-                style="red",
+            
+        self.console.print(table)
+    
+    def print_time_series(self) -> None:
+        """Print a time series analysis of events."""
+        # Group events by hour
+        hourly_counts = defaultdict(Counter)
+        
+        for event in self.events:
+            timestamp = event.get("timestamp", "")
+            event_type = event.get("event_type", "Unknown")
+            
+            try:
+                dt = datetime.fromisoformat(timestamp)
+                hour_key = dt.strftime("%Y-%m-%d %H:00")
+                hourly_counts[hour_key][event_type] += 1
+            except (ValueError, TypeError):
+                pass
+        
+        table = Table(title="Hourly Event Distribution", box=rich.box.ROUNDED)
+        table.add_column("Hour", style="cyan")
+        table.add_column("Total Events", style="magenta")
+        table.add_column("Top Event Types", style="green")
+        
+        for hour, counts in sorted(hourly_counts.items()):
+            total = sum(counts.values())
+            top_types = ", ".join(f"{t} ({c})" for t, c in counts.most_common(3))
+            
+            table.add_row(
+                hour,
+                str(total),
+                top_types
             )
-        )
+            
+        self.console.print(table)
+    
+    def get_sequential_patterns(self, min_length: int = 2, min_occurrences: int = 2) -> List[Tuple[Tuple[str, ...], int]]:
+        """Find common sequences of event types.
+        
+        Args:
+            min_length: Minimum sequence length to consider
+            min_occurrences: Minimum number of occurrences to report
+            
+        Returns:
+            List of (sequence, count) tuples
+        """
+        sequences = defaultdict(int)
+        
+        # Group by session
+        session_events = defaultdict(list)
+        for event in self.events:
+            session_id = event.get("session_id", "")
+            event_type = event.get("event_type", "Unknown")
+            session_events[session_id].append(event_type)
+        
+        # Find sequences in each session
+        for session_id, events in session_events.items():
+            for i in range(len(events) - min_length + 1):
+                for seq_len in range(min_length, min(len(events) - i + 1, min_length + 3)):
+                    seq = tuple(events[i:i+seq_len])
+                    sequences[seq] += 1
+        
+        # Filter by minimum occurrences
+        return [
+            (seq, count) for seq, count in sequences.items() 
+            if count >= min_occurrences
+        ]
+    
+    def print_common_sequences(self) -> None:
+        """Print common sequences of events."""
+        sequences = self.get_sequential_patterns(min_length=2, min_occurrences=2)
+        sequences.sort(key=lambda x: x[1], reverse=True)
+        
+        table = Table(title="Common Event Sequences", box=rich.box.ROUNDED)
+        table.add_column("Sequence", style="cyan")
+        table.add_column("Count", style="magenta")
+        
+        for seq, count in sequences[:10]:  # Show top 10
+            seq_str = " → ".join(seq)
+            table.add_row(seq_str, str(count))
+            
+        self.console.print(table)
+    
+    def print_all_stats(self) -> None:
+        """Print all statistics."""
+        self.print_summary()
+        self.console.print()
+        self.print_event_type_distribution()
+        self.console.print()
+        self.print_session_stats()
+        self.console.print()
+        self.print_time_series()
+        self.console.print()
+        self.print_common_sequences()
 
-    # Summary footer
-    console.print("\n[bold blue]📝 Summary:[/bold blue]")
-    if log_times:
-        console.print(f"• Log span: {start_time.isoformat()} to {end_time.isoformat()}")
-        console.print(f"• Duration: {duration:.2f} seconds")
-    console.print(f"• Log types: {len(metrics['event_types'])} different event types")
-    console.print(f"• Components: {len(metrics['components'])} different components")
-    console.print(f"• Traces: {len(metrics['traces'])} distinct trace IDs")
 
-
-def main():
-    args = parse_args()
-    generate_stats(args)
+def main() -> None:
+    """Main entry point."""
+    import argparse
+    
+    parser = argparse.ArgumentParser(description="LLMgine Log Statistics")
+    parser.add_argument("log_file", type=str, help="Path to event log file")
+    parser.add_argument("--summary", "-s", action="store_true", help="Print summary only")
+    parser.add_argument("--events", "-e", action="store_true", help="Print event type distribution")
+    parser.add_argument("--sessions", "-S", action="store_true", help="Print session statistics")
+    parser.add_argument("--time", "-t", action="store_true", help="Print time series analysis")
+    parser.add_argument("--sequences", "-q", action="store_true", help="Print common event sequences")
+    
+    args = parser.parse_args()
+    
+    console = Console()
+    log_path = Path(args.log_file)
+    
+    if not log_path.exists():
+        console.print(f"Log file not found: {log_path}", style="bold red")
+        return
+    
+    stats = LogStats(log_path, console)
+    
+    # If no specific stats requested, print all
+    if not any([args.summary, args.events, args.sessions, args.time, args.sequences]):
+        stats.print_all_stats()
+        return
+    
+    if args.summary:
+        stats.print_summary()
+        console.print()
+        
+    if args.events:
+        stats.print_event_type_distribution()
+        console.print()
+        
+    if args.sessions:
+        stats.print_session_stats()
+        console.print()
+        
+    if args.time:
+        stats.print_time_series()
+        console.print()
+        
+    if args.sequences:
+        stats.print_common_sequences()
 
 
 if __name__ == "__main__":

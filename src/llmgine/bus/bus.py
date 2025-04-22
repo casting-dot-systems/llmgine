@@ -316,10 +316,14 @@ class MessageBus:
 
         try:
             logger.info(f"Executing command {command_type.__name__}")
-            await self.publish(CommandStartedEvent(command=command))
+            await self.publish(
+                CommandStartedEvent(command=command, session_id=command.session_id)
+            )
             result: CommandResult = await handler(command)
             logger.info(f"Command {command_type.__name__} executed successfully")
-            await self.publish(CommandResultEvent(command_result=result))
+            await self.publish(
+                CommandResultEvent(command_result=result, session_id=command.session_id)
+            )
             return result
 
         except Exception as e:
@@ -380,6 +384,14 @@ class MessageBus:
                 await asyncio.sleep(0.1)
 
         logger.info("Event processing loop finished")
+
+    async def ensure_events_processed(self) -> None:
+        """
+        Ensure all events in the queue are processed.
+        """
+        while not self._event_queue.empty():
+            event = await self._event_queue.get()
+            await self._handle_event(event)
 
     async def _handle_event(self, event: Event) -> None:
         """

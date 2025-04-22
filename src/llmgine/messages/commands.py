@@ -39,6 +39,7 @@ class CommandResult:
     result: Optional[Any] = None
     error: Optional[str] = None
     metadata: Dict[str, Any] = field(default_factory=dict)
+    session_id: Optional[str] = None
 
     def __post_init__(self):
         # Add metadata about where this command was handled

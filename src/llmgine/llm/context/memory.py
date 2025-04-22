@@ -28,7 +28,7 @@ class SimpleChatHistory:
         # Clear history if system prompt changes?
         # self.clear()
 
-    def store_assistant_message(self, message_object: Any):
+    async def store_assistant_message(self, message_object: Any):
         """Store the raw assistant message object (which might contain tool calls)."""
         self.response_log.append(message_object)
         # Convert the OpenAI message object to the dict format for history
@@ -53,17 +53,14 @@ class SimpleChatHistory:
             history_entry["content"] = ""  # Or potentially remove the content key?
 
         self.chat_history.append(history_entry)
-        temp = asyncio.create_task(
-            self.bus.publish(
-                ChatHistoryUpdatedEvent(
-                    engine_id=self.engine_id,
-                    session_id=self.session_id,
-                    context_manager_id=self.context_manager_id,
-                    context=self.chat_history,
-                )
+        await self.bus.publish(
+            ChatHistoryUpdatedEvent(
+                engine_id=self.engine_id,
+                session_id=self.session_id,
+                context_manager_id=self.context_manager_id,
+                context=self.chat_history,
             )
         )
-        print(temp)
 
     def store_string(self, string: str, role: str):
         """Store a simple user or system message."""
@@ -81,23 +78,20 @@ class SimpleChatHistory:
         self.response_log.append(result_message)  # Log the result message
         self.chat_history.append(result_message)
 
-    def retrieve(self) -> List[Dict[str, Any]]:
+    async def retrieve(self) -> List[Dict[str, Any]]:
         """Retrieve the chat history in OpenAI format."""
         result = []
         if self.system_prompt:
             result.append({"role": "system", "content": self.system_prompt})
         result.extend(self.chat_history)
-        temp = asyncio.create_task(
-            self.bus.publish(
-                ChatHistoryRetrievedEvent(
-                    engine_id=self.engine_id,
-                    session_id=self.session_id,
-                    context_manager_id=self.context_manager_id,
-                    context=result,
-                )
+        await self.bus.publish(
+            ChatHistoryRetrievedEvent(
+                engine_id=self.engine_id,
+                session_id=self.session_id,
+                context_manager_id=self.context_manager_id,
+                context=result,
             )
         )
-        print(temp)
         return result
 
     def clear(self):

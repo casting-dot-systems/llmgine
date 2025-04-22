@@ -1,0 +1,9 @@
+# Mini-Editor Demo
+# Use Vim-like keybindings or regular editing
+
+def hello_world():
+    print('Hello, welcome to the mini text editor!')
+    return True
+
+if __name__ == '__main__':
+    hello_world()

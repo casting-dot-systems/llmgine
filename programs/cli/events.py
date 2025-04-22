@@ -1,0 +1,3 @@
+
+
+class EventStatus(Eum):

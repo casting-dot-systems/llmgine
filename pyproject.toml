@@ -16,6 +16,7 @@ classifiers = [
     "Topic :: Software Development :: Libraries :: Python Modules",
 ]
 dependencies = [
+    "aiofiles>=24.1.0",
     "discord>=2.3.2",
     "icecream>=2.1.4",
     "ipdb>=0.13.13",
@@ -23,6 +24,7 @@ dependencies = [
     "litellm>=1.63.12",
     "load-dotenv>=0.1.0",
     "notion-client>=2.3.0",
+    "prompt-toolkit>=3.0.51",
     "pyreadline>=2.1",
     "pytest>=8.3.5",
     "pytest-asyncio>=0.25.3",
