@@ -1,11 +1,17 @@
 from abc import ABC, abstractmethod
 import asyncio
-from typing import Optional
+from dataclasses import dataclass
+import dataclasses
+from typing import Optional, Type
+from jinja2 import pass_context
 from prompt_toolkit import HTML, PromptSession
 from rich.panel import Panel
 from rich.console import Console
 from rich.box import ROUNDED
 from rich import print
+from llmgine.bus.bus import MessageBus
+from llmgine.messages.commands import Command
+from llmgine.messages.events import Event
 
 MAX_WIDTH = 100
 PADDING = (1, 2)
@@ -16,21 +22,30 @@ class CLIComponent(ABC):
     def render(self):
         pass
 
-    @abstractmethod
-    def serialize(self):
-        pass
+    # @abstractmethod
+    # def serialize(self):
+    #     pass
 
 
 class CLIPrompt(ABC):
     @abstractmethod
-    def prompt(self, *args, **kwargs):
+    def get_input(self, *args, **kwargs):
         pass
 
+    @abstractmethod
+    def component(self):
+        pass
+
+@dataclass
+class UserComponentTestEvent(Event):
+    text: str = ""
 
 class UserComponent(CLIComponent):
-    def __init__(self, text: str, subtitle: Optional[str] = None):
-        self.text = text
-        self.subtitle = subtitle
+    """
+    Event must have property text.
+    """
+    def __init__(self, event: Event):
+        self.text = event.text
 
     def render(self):
         print(
@@ -38,7 +53,6 @@ class UserComponent(CLIComponent):
                 self.text,
                 title="[bold blue]User[/bold blue]",
                 subtitle_align="right",
-                subtitle=f"[blue]{self.subtitle}[/blue]",
                 style="blue",
                 width=MAX_WIDTH,
                 padding=PADDING,
@@ -50,17 +64,21 @@ class UserComponent(CLIComponent):
     def serialize(self):
         return {"role": "user", "content": self.text}
 
-
+@dataclass
+class AssistantResultTestEvent(Event):
+    text: str = ""
 class AssistantComponent(CLIComponent):
-    def __init__(self, text: str, name: str):
-        self.text = text
-        self.name = name
+    """
+    Event must have property text.
+    """
+    def __init__(self, event: Event):
+        self.text = event.text
 
     def render(self):
         print(
             Panel(
                 self.text,
-                title=f"[bold green]{self.name}[/bold green]",
+                title="[bold green]Assistant[/bold green]",
                 style="green",
                 width=MAX_WIDTH,
                 padding=PADDING,
@@ -68,15 +86,19 @@ class AssistantComponent(CLIComponent):
             )
         )
 
-    @property
-    def serialize(self):
-        return {"role": "assistant", "content": self.text}
+@dataclass 
+class ToolResultTestEvent(Event):
+    tool_name: str = ""
+    result: str = ""
 
 
 class ToolComponent(CLIComponent):
-    def __init__(self, tool_name: str, tool_result: str):
-        self.tool_name = tool_name
-        self.tool_result = tool_result
+    """
+    Event must have property tool_name and tool_result.
+    """
+    def __init__(self, event: Event):
+        self.tool_name = event.tool_name
+        self.tool_result = event.result
 
     def render(self):
         print(
@@ -94,16 +116,42 @@ class ToolComponent(CLIComponent):
     def serialize(self):
         return {"role": "tool", "content": self.tool_result}
 
+@dataclass
+class GeneralInputTestEvent(Event):
+    prompt: str = ""
+
+class GeneralInput(CLIPrompt):
+    """
+    Command must have property prompt.
+    """
+    def __init__(self, command: Command):
+        self.prompt = command.prompt
+
+    def get_input(self):
+        return self.prompt
+
+    def component(self):
+        return self.prompt
+
+
+@dataclass
+class YesNoPromptTestEvent(Event):
+    prompt: str = ""
 
 class YesNoPrompt(CLIPrompt):
-    def __init__(self, prompt: Event):
-        self.session = PromptSession()
-        self.prompt = Event.prompt
+    """
+    Command must have property prompt. 
+    """
 
-    async def prompt(self):
+    def __init__(self, command: Command):
+        self.session = PromptSession()
+        self.prompt = command.prompt
+        self.result = None
+
+    async def get_input(self):
         print(
             Panel(
-                self.question,
+                self.prompt,
                 title="[bold yellow]Yes/No Prompt[/bold yellow]",
                 subtitle="[yellow]Type your message...[/yellow]",
                 title_align="left",
@@ -112,53 +160,83 @@ class YesNoPrompt(CLIPrompt):
                 padding=PADDING,
             )
         )
-        user_input = await self.session.prompt_async(
-            HTML("  ❯ "),
-            multiline=True,
-            prompt_continuation=HTML("  ❯ "),
-            vi_mode=True,
-        )
-        if user_input.lower() in ("yes", "y"):
-            return True
-        elif user_input.lower() in ("no", "n"):
-            return False
-        else:
-            Console().print(
-                "[bold red]Invalid input[/bold red]. Please enter 'yes' or 'no'."
+        while True:
+            user_input = await self.session.prompt_async(
+                HTML("  ❯ "),
             )
-            return await self.prompt()
+            if user_input.lower() in ("yes", "y"):
+                self.result = True
+                return True
+            elif user_input.lower() in ("no", "n"):
+                self.result = False
+                return False
+            else:
+                Console().print(
+                    "[bold red]Invalid input[/bold red]. Please enter 'yes' or 'no'."
+                )
+                continue
+
+    @property
+    def component(self):
+        if self.result is None:
+            raise ValueError("Result is not set")
+        return None
 
 
-async def main():
-    class EngineCLI(CLI):
-        def component_router(self, event: CustomEvent1):
-            component = componentlookup[type(CustomEvent1)]
+    class EngineCLI:
+        def __init__(self, update_status_event: Event):
+            self.update_status_event = update_status_event
+            self.components = []
+            self.component_lookup = {}
+            self.prompt_lookup = {}
+            self.bus = MessageBus()
+
+        async def component_router(self, event: Event):
+            component = self.component_lookup[type(event)]
             component = component(event)
             component.render()
             self.components.append(component)
 
-        async def prompt_router(self, event: PromptCommand):
-            prompt = promptlookup[type(event)]
-            prompt = prompt(event)
+        async def prompt_router(self, command: Command):
+            prompt = self.prompt_lookup[type(command)]
+            prompt = prompt(command)
             result = await prompt.prompt()
             self.clear_screen()
             self.render()
-            component = prompt.component()
-            component.render()
-            self.components.append(component)
+            if prompt.component is not None:
+                component = prompt.component
+                component.render()
+                self.components.append(component)
 
+        async def update_status(self, event: Event):
+            pass
+        
         def register_component_event(self, event: Event, component: Type[CLIComponent]):
             self.component_lookup[type(event)] = component
+            self.bus.register_event_handler(event, self.component_router)
+        
+        def register_prompt_command(self, command: Command, prompt: CLIPrompt):
+            self.prompt_lookup[type(command)] = prompt
+            self.bus.register_event_handler(command, self.prompt_router)
 
-    CLI.register_component_event(CustomEvent1, ComponentRouter)
-    register_engine_output
-    register_
+        def redraw(self):
+            self.clear_screen()
+            for component in self.components:
+                component.render()
 
-    UserComponent("Hello, world!", "29:10").render()
-    AssistantComponent("Hey there!", "Assistant").render()
-    ToolComponent("get_weather", "Tool result").render()
-    prompt = YesNoPrompt("Do you want to continue?")
-    result = await prompt.prompt()
+        def start(self):
+            self.setup()
+            self.bus.run()
+        
+        def stop(self):
+            self.bus.stop()
+
+async def main():
+    UserComponent(UserComponentTestEvent(text="Hello, world!")).render()
+    AssistantComponent(AssistantResultTestEvent(text="Hey there!")).render()
+    ToolComponent(ToolResultTestEvent(tool_name="get_weather", result="Tool result")).render()
+    prompt = YesNoPrompt(YesNoPromptTestEvent(prompt="Do you want to continue?"))
+    result = await prompt.get_input()
     print(result)
 
 
