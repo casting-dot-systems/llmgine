@@ -27,7 +27,7 @@ from llmgine.llm.providers.openai_provider import OpenAIResponse, OpenAIProvider
 from llmgine.llm.providers.openrouter import OpenRouterProvider
 from llmgine.llm.providers import Providers
 
-dotenv.load_dotenv()
+dotenv.load_dotenv(override=True)
 
 
 class Gpt41Mini:
@@ -117,11 +117,12 @@ class Gpt_4o_Mini_Latest:
     The latest GPT-4o Mini model.
     """
 
-    def __init__(self, provider: Providers) -> None:
+    def __init__(self, provider: Providers, engine_id: Optional[str] = None) -> None:
         self.generate = None
         self.api_key = os.getenv("OPENAI_API_KEY")
         self.model = "gpt-4o-mini"
         self.provider = self.__getProvider(provider)
+        self.engine_id = engine_id
 
     def __getProvider(self, provider: Providers) -> OpenAIProvider:
         """Get the provider and set the generate method."""

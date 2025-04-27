@@ -5,36 +5,30 @@ from rich.spinner import Spinner
 from rich.align import Align
 from rich.panel import Panel
 from rich.text import Text
+from prompt_toolkit import HTML, PromptSession
+from llmgine.ui.cli.config import CLIConfig
+from rich import print
 
 console = Console()
 
 
 async def main():
-    async def loading_panel(message: str) -> Panel:
-        spinner = Spinner("dots", text=message)
-        return Panel(
-            Align.center(spinner, vertical="middle"),
-            title="Loading",
-            border_style="blue",
-            padding=(2, 4),
-        )
-
-    # This simulates something loading
-    with Live(
-        Align.center(Text("Starting...")), refresh_per_second=10, console=console
-    ) as live:
-        await asyncio.sleep(1)
-        live.update(await loading_panel("Connecting to server..."))
-        await asyncio.sleep(2)
-        live.update(await loading_panel("Fetching data..."))
-        await asyncio.sleep(2)
-        live.update(await loading_panel("Processing results..."))
-        await asyncio.sleep(2)
-        live.update(
+    while True:
+        print(
             Panel(
-                Align.center(Text("✅ Done!", style="bold green")), border_style="green"
+                "hello",
+                title="[bold yellow]Prompt[/bold yellow]",
+                subtitle="[yellow]Type your message... (y/n)[/yellow]",
+                title_align="left",
+                width=CLIConfig().max_width,
+                style="yellow",
+                padding=CLIConfig().padding,
             )
         )
+        user_input = await PromptSession().prompt_async(
+            HTML("  ❯ "),
+        )
+        print(user_input)
 
 
 asyncio.run(main())

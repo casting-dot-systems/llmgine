@@ -5,6 +5,7 @@ import dataclasses
 from operator import truediv
 from typing import Optional, Type
 from prompt_toolkit import HTML, PromptSession
+import rich
 from rich.panel import Panel
 from rich.console import Console
 from rich.box import ROUNDED
@@ -14,6 +15,8 @@ from llmgine.messages.commands import Command, CommandResult
 from llmgine.messages.events import Event
 from rich.spinner import Spinner
 from rich.live import Live
+from rich.prompt import Prompt
+from rich.prompt import Confirm
 from typing import TYPE_CHECKING
 
 from llmgine.ui.cli.config import CLIConfig
@@ -226,7 +229,6 @@ class YesNoPrompt(CLIPrompt):
     """
 
     def __init__(self, command: Command):
-        self.session = PromptSession()
         self.prompt = command.prompt
         self.result = None
 
@@ -243,29 +245,15 @@ class YesNoPrompt(CLIPrompt):
             )
         )
         while True:
-            user_input = await self.session.prompt_async(
-                HTML("  ❯ "),
-            )
-            if user_input.lower() in ("yes", "y"):
-                self.result = True
-                return True
-            elif user_input.lower() in ("no", "n"):
-                self.result = False
-                return False
-            else:
-                Console().print(
-                    "[bold red]Invalid input[/bold red]. Please enter 'yes' or 'no'."
-                )
-                continue
+            user_input = Confirm.ask()
+            return user_input
 
     @property
     def component(self):
-        if self.result is None:
-            raise ValueError("Result is not set")
         return None
 
     def attach_cli(self, cli: "EngineCLI"):
-        self.cli = cli
+        self.cli = None
 
 
 async def main():

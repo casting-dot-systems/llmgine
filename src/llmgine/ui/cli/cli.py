@@ -1,12 +1,13 @@
 import asyncio
 import os
+import sys
 from llmgine.bus.bus import MessageBus
 from llmgine.llm.engine.engine import (
     DummyEngineConfirmationInput,
     DummyEngineStatusUpdate,
     DummyEngineToolResult,
 )
-from llmgine.messages.commands import Command
+from llmgine.messages.commands import Command, CommandResult
 from llmgine.messages.events import Event
 from rich.live import Live
 from rich.spinner import Spinner
@@ -78,12 +79,17 @@ class EngineCLI:
         self.validate_setup()
         while True:
             user_input = await self.main_input()
+            if user_input is None:
+                continue
+
             result = await self.bus.execute(
                 self.engine_command(prompt=user_input, session_id=self.session_id)
             )
-            self.components.append(self.engine_result_component(result))
-            self.redraw()
-            # engine_result = await self.main_engine(user_input)
+            if result.success:
+                self.components.append(self.engine_result_component(result))
+                self.redraw()
+            else:
+                print(result.error)
 
     def validate_setup(self):
         if self.engine is None:
@@ -107,9 +113,6 @@ class EngineCLI:
     async def update_status(self, event: Event):
         if event.status == "finished":
             await self.stop_loading()
-            self.hidden = True
-            self.spinner = None
-            self.live = None
         else:
             if not self.spinner:
                 self.spinner = Spinner("point", text=f"[bold white]{event.status}")
@@ -134,26 +137,29 @@ class EngineCLI:
         self.components.append(component)
 
     async def prompt_router(self, command: Command):
-        self.stop_loading()
-        prompt = self.prompt_lookup[type(command)]
-        prompt = prompt(command)
-        prompt.attach_cli(self)
-        result = await prompt.prompt()
-        self.clear_screen()
-        self.redraw()
-        if prompt.component is not None:
-            component = prompt.component
-            component.render()
-            self.components.append(component)
-        return result
+        try:
+            await self.stop_loading()
+            prompt = self.prompt_lookup[type(command)]
+            prompt = prompt(command)
+            prompt.attach_cli(self)
+            result = await prompt.get_input()
+            self.clear_screen()
+            self.redraw()
+            if prompt.component is not None:
+                component = prompt.component
+                component.render()
+                self.components.append(component)
+            return CommandResult(success=True, result=result)
+        except Exception as e:
+            return CommandResult(success=False, error=str(e))
 
-    def register_component_event(self, event: Event, component: Type[CLIComponent]):
-        self.component_lookup[type(event)] = component
+    def register_component_event(self, event: Type[Event], component: Type[CLIComponent]):
+        self.component_lookup[event] = component
         self.bus.register_event_handler(event, self.component_router, self.session_id)
 
-    def register_prompt_command(self, command: Command, prompt: CLIPrompt):
-        self.prompt_lookup[type(command)] = prompt
-        self.bus.register_event_handler(command, self.prompt_router, self.session_id)
+    def register_prompt_command(self, command: Type[Command], prompt: CLIPrompt):
+        self.prompt_lookup[command] = prompt
+        self.bus.register_command_handler(command, self.prompt_router, self.session_id)
 
     def register_loading_event(self, event: Event):
         self.bus.register_event_handler(event, self.update_status, self.session_id)
@@ -186,7 +192,7 @@ class EngineCLI:
         self.clear_screen()
 
     def exit_cmd(self):
-        os._exit(0)
+        sys.exit(0)
 
     def register_default_cli_commands(self):
         self.register_cli_command("clear", self.clear_screen_cmd)

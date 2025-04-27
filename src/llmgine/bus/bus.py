@@ -353,6 +353,8 @@ class MessageBus:
             logger.debug(f"Queued event: {type(event).__name__}")
         except Exception as e:
             logger.error(f"Error queing event: {e}", exc_info=True)
+        finally:
+            await self.ensure_events_processed()
 
     async def _process_events(self) -> None:
         """

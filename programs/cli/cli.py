@@ -31,7 +31,7 @@ from engines.tool_chat_engine import (
     ToolChatEngine,
     PromptResponseEvent,
     PromptCommand,
-    DisplayStatusEvent,
+    ToolChatEngineStatusEvent,
 )
 
 
@@ -103,7 +103,7 @@ class CLIInterface:
         )
 
         self.bus.register_event_handler(
-            DisplayStatusEvent,
+            ToolChatEngineStatusEvent,
             self.handle_status_event,
             "cli_session",
         )
@@ -117,7 +117,7 @@ class CLIInterface:
         await self.bus.stop()
 
     # ------ Events and commands handling ------
-    async def handle_status_event(self, event: DisplayStatusEvent):
+    async def handle_status_event(self, event: ToolChatEngineStatusEvent):
         await self.update_status(event.status)
 
     async def handle_response_llm(self, event: PromptResponseEvent):

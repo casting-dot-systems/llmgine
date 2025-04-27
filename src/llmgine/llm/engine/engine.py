@@ -29,7 +29,8 @@ class DummyEngineConfirmationInput(Command):
 
 
 @dataclass
-class DummyEngineToolResult(CommandResult):
+class DummyEngineToolResult(Event):
+    tool_name: str = ""
     result: str = ""
 
 
@@ -53,19 +54,26 @@ class DummyEngine(Engine):
         await self.bus.publish(
             DummyEngineStatusUpdate(status="finished", session_id=self.session_id)
         )
+        # breakpoint()
         confirmation = await self.bus.execute(
-            DummyEngineConfirmationInput(prompt="Do you want to execute a tool?")
+            DummyEngineConfirmationInput(prompt="Do you want to execute a tool?", session_id=self.session_id)
         )
         await self.bus.publish(
             DummyEngineStatusUpdate(status="executing tool", session_id=self.session_id)
         )
-        await asyncio.sleep(3)
-        if confirmation.result == "yes":
+        await asyncio.sleep(1)
+        if confirmation.result:
             await self.bus.publish(
                 DummyEngineToolResult(
-                    result="Tool result is here!", session_id=self.session_id
+                    tool_name="get_weather",
+                    result="Tool result is here!",
+                    session_id=self.session_id,
                 )
             )
+        await self.bus.publish(
+            DummyEngineStatusUpdate(status="finished", session_id=self.session_id)
+        )
+        await self.bus.ensure_events_processed()
         return CommandResult(success=True, result=result)
 
     def execute(self, prompt: str):

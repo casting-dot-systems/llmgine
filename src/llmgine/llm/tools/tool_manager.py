@@ -137,7 +137,6 @@ class ToolManager:
         Raises:
             ValueError: If the tool is not found
         """
-        print(f"i made it here executing tool {tool_name}")
         if tool_name not in self.tools:
             error_msg = f"Tool not found: {tool_name}"
             raise ValueError(error_msg)

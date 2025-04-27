@@ -1,71 +1,46 @@
 import uuid
 import os
 import json
+import asyncio
 from typing import Any, Dict, List, Optional
 
 from llmgine.bus.bus import MessageBus
 from llmgine.llm.context.memory import SimpleChatHistory
-from llmgine.llm.models.openai_models import Gpt_4o_Mini_Latest
+from llmgine.llm.models.openai_models import Gpt41Mini, Gpt_4o_Mini_Latest
 from llmgine.llm.providers.providers import Providers
 from llmgine.llm.tools.tool_manager import ToolManager
 from llmgine.llm.tools.types import ToolCall
 from llmgine.messages.commands import Command, CommandResult
 from llmgine.messages.events import Event
+from llmgine.ui.cli.cli import EngineCLI
+from llmgine.ui.cli.components import CLIPrompt, EngineResultComponent
 from dataclasses import dataclass, field
 
+@dataclass
+class ToolChatEngineCommand(Command):
+    """Command for the Tool Chat Engine."""
 
-class PromptCommand(Command):
-    def __init__(self, message: str, session_id: str = None, tools: List[Any] = None):
-        super().__init__()
-        self.message = message
-        self.session_id = session_id
-        self.tools = tools
+    prompt: str = ""
 
 
 @dataclass
-class DisplayStatusEvent(Event):
+class ToolChatEngineStatusEvent(Event):
     """Event emitted when the status of the engine changes."""
 
     status: str = ""
 
-
 @dataclass
-class PromptResponseEvent(Event):
-    """Event emitted when a prompt is processed and a response is generated."""
-
-    prompt: str = ""
-    response: str = ""
-    tool_calls: Optional[List[ToolCall]] = None
-    session_id: str = "global"
-
-
-@dataclass
-class ToolExecutionEvent(Event):
+class ToolChatEngineToolResultEVent(Event):
     """Event emitted when a tool is executed."""
 
     tool_name: str = ""
-    arguments: Dict[str, Any] = field(default_factory=dict)
     result: Any = None
-    session_id: str = "global"
-
-
-# Create a simple engine interface to avoid circular imports
-class SimpleEngine:
-    """Simple engine interface to avoid circular imports."""
-
-    def __init__(self, engine_id: str, session_id: str):
-        self.engine_id = engine_id
-        self.session_id = session_id
 
 
 class ToolChatEngine:
     def __init__(
         self,
         session_id: str,
-        api_key: Optional[str] = None,
-        model: str = "gpt-4o-mini",
-        system_prompt: Optional[str] = None,
-        message_bus: Optional[MessageBus] = None,
     ):
         """Initialize the LLM engine.
 
@@ -77,38 +52,21 @@ class ToolChatEngine:
             message_bus: Optional MessageBus instance (from bootstrap)
         """
         # Use the provided message bus or create a new one
-        self.message_bus = message_bus or MessageBus()
+        self.message_bus = MessageBus()
         self.engine_id = str(uuid.uuid4())
         self.session_id = session_id
-        self.model = model
 
-        # Get API key from environment if not provided
-        self.api_key = api_key or os.environ.get("OPENAI_API_KEY")
-        if not self.api_key:
-            raise ValueError(
-                "OpenAI API key must be provided or set as OPENAI_API_KEY environment variable"
-            )
-
-        # Create tightly coupled components - pass the simple engine
         # Create tightly coupled components - pass the simple engine
         self.context_manager = SimpleChatHistory(
             engine_id=self.engine_id, session_id=self.session_id
         )
-        self.llm_manager = Gpt_4o_Mini_Latest(Providers.OPENAI)
+        self.llm_manager = Gpt41Mini(Providers.OPENAI)
         self.tool_manager = ToolManager(
             engine_id=self.engine_id, session_id=self.session_id, llm_model_name="openai"
         )
 
-        # Set system prompt if provided
-        if system_prompt:
-            self.context_manager.set_system_prompt(system_prompt)
 
-        # Register command handlers for this specific engine's session
-        self.message_bus.register_command_handler(
-            self.session_id, PromptCommand, self.handle_prompt_command
-        )
-
-    async def handle_prompt_command(self, command: PromptCommand) -> CommandResult:
+    async def handle_command(self, command: ToolChatEngineCommand) -> CommandResult:
         """Handle a prompt command following OpenAI tool usage pattern.
 
         Args:
@@ -119,13 +77,7 @@ class ToolChatEngine:
         """
         try:
             # 1. Add user message to history
-            self.context_manager.store_string(command.message, "user")
-            # Publish event to update CLI
-            await self.message_bus.publish(
-                DisplayStatusEvent(
-                    f"Processing command: {command.message}.", session_id=self.session_id
-                ),
-            )
+            self.context_manager.store_string(command.prompt, "user")
 
             # Loop for potential tool execution cycles
             while True:
@@ -139,6 +91,11 @@ class ToolChatEngine:
                 # print(
                 #     f"\nCalling LLM with context:\n{json.dumps(current_context, indent=2)}\n"
                 # )  # Debug print
+                await self.message_bus.publish(
+                    ToolChatEngineStatusEvent(
+                        status="calling LLM", session_id=self.session_id
+                    )
+                )
                 response = await self.llm_manager.generate(
                     messages=current_context, tools=tools
                 )
@@ -159,8 +116,8 @@ class ToolChatEngine:
 
                     # Notify status complete
                     await self.message_bus.publish(
-                        DisplayStatusEvent(
-                            status="Response ready", session_id=self.session_id
+                        ToolChatEngineStatusEvent(
+                            status="finished", session_id=self.session_id
                         )
                     )
                     return CommandResult(
@@ -168,9 +125,6 @@ class ToolChatEngine:
                     )
 
                 # 8. Process tool calls
-                print(
-                    f"Processing {len(response_message.tool_calls)} tool calls..."
-                )  # Debug print
                 for tool_call in response_message.tool_calls:
                     tool_call_obj = ToolCall(
                         id=tool_call.id,
@@ -179,6 +133,12 @@ class ToolChatEngine:
                     )
                     try:
                         # Execute the tool
+                        await self.message_bus.publish(
+                            ToolChatEngineStatusEvent(
+                                status="executing tool", session_id=self.session_id
+                            )
+                        )
+                        
                         result = await self.tool_manager.execute_tool_call(tool_call_obj)
 
                         # Convert result to string if needed for history
@@ -186,10 +146,6 @@ class ToolChatEngine:
                             result_str = json.dumps(result)
                         else:
                             result_str = str(result)
-
-                        print(
-                            f"Tool '{tool_call_obj.name}' result: {result_str}"
-                        )  # Debug print
 
                         # Store tool execution result in history
                         self.context_manager.store_tool_call_result(
@@ -200,10 +156,9 @@ class ToolChatEngine:
 
                         # Publish tool execution event
                         await self.message_bus.publish(
-                            ToolExecutionEvent(
+                            ToolChatEngineToolResultEVent(
                                 tool_name=tool_call_obj.name,
-                                arguments=json.loads(tool_call_obj.arguments),
-                                result=result,
+                                result=result_str,
                                 session_id=self.session_id,
                             )
                         )
@@ -237,23 +192,7 @@ class ToolChatEngine:
             function: The function to register as a tool
         """
         await self.tool_manager.register_tool(function)
-
-    async def process_message(self, message: str) -> str:
-        """Process a user message and return the response.
-
-        Args:
-            message: The user message to process
-
-        Returns:
-            str: The assistant's response
-        """
-        command = PromptCommand(message=message, session_id=self.session_id)
-        result = await self.message_bus.execute(command)
-
-        if not result.success:
-            raise RuntimeError(f"Failed to process message: {result.error}")
-
-        return result.result
+        print(f"Tool registered: {function.__name__}")
 
     async def clear_context(self):
         """Clear the conversation context."""
@@ -266,3 +205,22 @@ class ToolChatEngine:
             prompt: The system prompt to set
         """
         self.context_manager.set_system_prompt(prompt)
+
+
+async def main():
+    from tools_gallery.test_tools import get_weather
+    from llmgine.ui.cli.components import ToolComponent
+    await MessageBus().start()
+    cli = EngineCLI("test")
+    engine = ToolChatEngine(session_id="test")
+    await engine.register_tool(get_weather)
+    cli.register_engine(engine)
+    cli.register_engine_command(ToolChatEngineCommand)
+    cli.register_engine_result_component(EngineResultComponent)
+    cli.register_loading_event(ToolChatEngineStatusEvent)
+    cli.register_component_event(ToolChatEngineToolResultEVent, ToolComponent)
+    await cli.main()
+
+
+if __name__ == "__main__":
+    asyncio.run(main())
