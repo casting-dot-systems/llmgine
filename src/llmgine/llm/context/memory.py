@@ -10,7 +10,7 @@ from llmgine.llm.context.context_events import (
     ChatHistoryRetrievedEvent,
     ChatHistoryUpdatedEvent,
 )
-from llmgine.llm.engine.core import LLMEngine
+from llmgine.llm.engine.engine import LLMEngine
 
 
 class SimpleChatHistory:

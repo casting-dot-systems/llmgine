@@ -2,19 +2,24 @@ from abc import ABC, abstractmethod
 import asyncio
 from dataclasses import dataclass
 import dataclasses
+from operator import truediv
 from typing import Optional, Type
-from jinja2 import pass_context
 from prompt_toolkit import HTML, PromptSession
 from rich.panel import Panel
 from rich.console import Console
 from rich.box import ROUNDED
 from rich import print
 from llmgine.bus.bus import MessageBus
-from llmgine.messages.commands import Command
+from llmgine.messages.commands import Command, CommandResult
 from llmgine.messages.events import Event
+from rich.spinner import Spinner
+from rich.live import Live
+from typing import TYPE_CHECKING
 
-MAX_WIDTH = 100
-PADDING = (1, 2)
+from llmgine.ui.cli.config import CLIConfig
+
+if TYPE_CHECKING:
+    from llmgine.ui.cli.cli import EngineCLI
 
 
 class CLIComponent(ABC):
@@ -36,16 +41,23 @@ class CLIPrompt(ABC):
     def component(self):
         pass
 
+
 @dataclass
-class UserComponentTestEvent(Event):
+class UserComponentEvent(Event):
     text: str = ""
+
 
 class UserComponent(CLIComponent):
     """
     Event must have property text.
     """
+
     def __init__(self, event: Event):
         self.text = event.text
+
+    @classmethod
+    def from_text(cls, text: str):
+        return cls(UserComponentEvent(text=text))
 
     def render(self):
         print(
@@ -54,8 +66,8 @@ class UserComponent(CLIComponent):
                 title="[bold blue]User[/bold blue]",
                 subtitle_align="right",
                 style="blue",
-                width=MAX_WIDTH,
-                padding=PADDING,
+                width=CLIConfig().max_width,
+                padding=CLIConfig().padding,
                 title_align="left",
             )
         )
@@ -64,13 +76,44 @@ class UserComponent(CLIComponent):
     def serialize(self):
         return {"role": "user", "content": self.text}
 
+
 @dataclass
-class AssistantResultTestEvent(Event):
+class EngineResultCommandResult(CommandResult):
+    result: str = ""
+    success: bool = True
+
+
+class EngineResultComponent(CLIComponent):
+    """
+    Renders the output of the engine command. Takes in a CommandResult object.
+    """
+
+    def __init__(self, result: CommandResult):
+        self.result = result.result
+
+    def render(self):
+        print(
+            Panel(
+                self.result,
+                title="[bold green]Engine Result[/bold green]",
+                style="green",
+                width=CLIConfig().max_width,
+                padding=CLIConfig().padding,
+                title_align="left",
+            )
+        )
+
+
+@dataclass
+class AssistantResultEvent(Event):
     text: str = ""
+
+
 class AssistantComponent(CLIComponent):
     """
     Event must have property text.
     """
+
     def __init__(self, event: Event):
         self.text = event.text
 
@@ -80,14 +123,15 @@ class AssistantComponent(CLIComponent):
                 self.text,
                 title="[bold green]Assistant[/bold green]",
                 style="green",
-                width=MAX_WIDTH,
-                padding=PADDING,
+                width=CLIConfig().max_width,
+                padding=CLIConfig().padding,
                 title_align="left",
             )
         )
 
-@dataclass 
-class ToolResultTestEvent(Event):
+
+@dataclass
+class ToolResultEvent(Event):
     tool_name: str = ""
     result: str = ""
 
@@ -96,6 +140,7 @@ class ToolComponent(CLIComponent):
     """
     Event must have property tool_name and tool_result.
     """
+
     def __init__(self, event: Event):
         self.tool_name = event.tool_name
         self.tool_result = event.result
@@ -104,11 +149,11 @@ class ToolComponent(CLIComponent):
         print(
             Panel(
                 self.tool_result,
-                title=f"[yellow][bold]Tool: [/bold]{self.tool_name}[/yellow]",
+                title=f"[yellow][bold]:hammer_and_wrench: : {self.tool_name}[/bold][/yellow]",
                 title_align="left",
                 style="yellow",
-                width=MAX_WIDTH,
-                padding=PADDING,
+                width=CLIConfig().max_width,
+                padding=CLIConfig().padding,
             )
         )
 
@@ -116,31 +161,68 @@ class ToolComponent(CLIComponent):
     def serialize(self):
         return {"role": "tool", "content": self.tool_result}
 
+
 @dataclass
-class GeneralInputTestEvent(Event):
+class UserGeneralInputCommand(Command):
     prompt: str = ""
 
-class GeneralInput(CLIPrompt):
+
+class UserGeneralInput(CLIPrompt):
     """
     Command must have property prompt.
     """
-    def __init__(self, command: Command):
+
+    @classmethod
+    def from_prompt(cls, prompt: str, cli: Optional["EngineCLI"] = None):
+        return cls(UserGeneralInputCommand(prompt=prompt), cli=cli)
+
+    def __init__(self, command: Command, cli: "EngineCLI"):
+        self.session = PromptSession()
         self.prompt = command.prompt
+        self.result = None
+        self.cli = cli
 
-    def get_input(self):
-        return self.prompt
+    async def get_input(self):
+        print(
+            Panel(
+                "",
+                title="[bold blue]User[/bold blue]",
+                subtitle="[blue]Type your message... [/blue]",
+                title_align="left",
+                width=CLIConfig().max_width,
+                style="blue",
+                padding=0,
+            )
+        )
+        while True:
+            user_input = await self.session.prompt_async(
+                HTML("  ❯ "),
+                multiline=True,
+                prompt_continuation="  ❯ ",
+                vi_mode=CLIConfig().vi_mode,
+            )
+            if self.cli is not None:
+                if self.cli.process_cli_cmds(user_input):
+                    return None
+            self.result = user_input
+            return user_input
 
+    @property
     def component(self):
-        return self.prompt
+        if self.result is None:
+            return None
+        else:
+            return UserComponent.from_text(self.result)
 
 
 @dataclass
-class YesNoPromptTestEvent(Event):
+class YesNoPromptCommand(Event):
     prompt: str = ""
+
 
 class YesNoPrompt(CLIPrompt):
     """
-    Command must have property prompt. 
+    Command must have property prompt.
     """
 
     def __init__(self, command: Command):
@@ -152,12 +234,12 @@ class YesNoPrompt(CLIPrompt):
         print(
             Panel(
                 self.prompt,
-                title="[bold yellow]Yes/No Prompt[/bold yellow]",
-                subtitle="[yellow]Type your message...[/yellow]",
+                title="[bold yellow]Prompt[/bold yellow]",
+                subtitle="[yellow]Type your message... (y/n)[/yellow]",
                 title_align="left",
-                width=MAX_WIDTH,
+                width=CLIConfig().max_width,
                 style="yellow",
-                padding=PADDING,
+                padding=CLIConfig().padding,
             )
         )
         while True:
@@ -182,89 +264,22 @@ class YesNoPrompt(CLIPrompt):
             raise ValueError("Result is not set")
         return None
 
+    def attach_cli(self, cli: "EngineCLI"):
+        self.cli = cli
 
-    class EngineCLI:
-        def __init__(self, update_status_event: Event):
-            self.update_status_event = update_status_event
-            self.components = []
-            self.component_lookup = {}
-            self.prompt_lookup = {}
-            self.bus = MessageBus()
-
-        async def component_router(self, event: Event):
-            component = self.component_lookup[type(event)]
-            component = component(event)
-            component.render()
-            self.components.append(component)
-
-        async def prompt_router(self, command: Command):
-            prompt = self.prompt_lookup[type(command)]
-            prompt = prompt(command)
-            result = await prompt.prompt()
-            self.clear_screen()
-            self.render()
-            if prompt.component is not None:
-                component = prompt.component
-                component.render()
-                self.components.append(component)
-
-        async def update_status(self, event: Event):
-            pass
-        
-        def register_component_event(self, event: Event, component: Type[CLIComponent]):
-            self.component_lookup[type(event)] = component
-            self.bus.register_event_handler(event, self.component_router)
-        
-        def register_prompt_command(self, command: Command, prompt: CLIPrompt):
-            self.prompt_lookup[type(command)] = prompt
-            self.bus.register_event_handler(command, self.prompt_router)
-
-        def redraw(self):
-            self.clear_screen()
-            for component in self.components:
-                component.render()
-
-        def start(self):
-            self.setup()
-            self.bus.run()
-        
-        def stop(self):
-            self.bus.stop()
 
 async def main():
-    UserComponent(UserComponentTestEvent(text="Hello, world!")).render()
-    AssistantComponent(AssistantResultTestEvent(text="Hey there!")).render()
-    ToolComponent(ToolResultTestEvent(tool_name="get_weather", result="Tool result")).render()
-    prompt = YesNoPrompt(YesNoPromptTestEvent(prompt="Do you want to continue?"))
-    result = await prompt.get_input()
-    print(result)
+    # UserComponent(UserComponentEvent(text="Hello, world!")).render()
+    # AssistantComponent(AssistantResultEvent(text="Hey there!")).render()
+    # ToolComponent(ToolResultEvent(tool_name="get_weather", result="Tool result")).render()
+    # prompt = UserGeneralInput(
+    #     UserGeneralInputCommand(prompt="Do you want to continue?"), cli=None
+    # )
+    # result = await prompt.get_input()
+    # print(result)
+
+    EngineResultComponent(EngineResultCommandResult(result="Hello, world!")).render()
 
 
 if __name__ == "__main__":
     asyncio.run(main())
-
-
-class BotComponent(CLIComponent):
-    def __init__(self):
-        self.name = "bot"
-
-    def render(self, input):
-        return Panel(input, title=self.name, style="green")
-
-
-class SystemComponent(CLIComponent):
-    def __init__(self):
-        self.name = "System"
-
-    def render(self, input):
-        return Panel(input, title=self.name, style="yellow")
-
-
-class CLICommand(ABC):
-    @abstractmethod
-    def init(self):
-        pass
-
-    @abstractmethod
-    def execute(self):
-        pass
