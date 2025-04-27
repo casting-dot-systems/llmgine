@@ -209,7 +209,7 @@ class ToolChatEngine:
 
 
 async def main():
-    from tools_gallery.test_tools import get_weather
+    from tools.test_tools import get_weather
     from llmgine.ui.cli.components import ToolComponent
 
     await MessageBus().start()
