@@ -165,6 +165,25 @@ class ToolComponent(CLIComponent):
         return {"role": "tool", "content": self.tool_result}
 
 
+class ToolComponentShort(CLIComponent):
+    """
+    Event must have property tool_name and tool_result.
+    """
+
+    def __init__(self, event: Event):
+        self.tool_name = event.tool_name
+        self.tool_result = event.result
+
+    def render(self):
+        print(
+            Panel(
+                f"[yellow][bold]:hammer_and_wrench:  Executed tool: {self.tool_name}[/bold][/yellow]",
+                style="yellow",
+                width=CLIConfig().max_width,
+            )
+        )
+
+
 @dataclass
 class UserGeneralInputCommand(Command):
     prompt: str = ""
@@ -266,7 +285,10 @@ async def main():
     # result = await prompt.get_input()
     # print(result)
 
-    EngineResultComponent(EngineResultCommandResult(result="Hello, world!")).render()
+    # EngineResultComponent(EngineResultCommandResult(result="Hello, world!")).render()
+    ToolComponentShort(
+        ToolResultEvent(tool_name="get_weather", result="Tool result")
+    ).render()
 
 
 if __name__ == "__main__":
