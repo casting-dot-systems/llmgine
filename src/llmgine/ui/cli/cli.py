@@ -181,17 +181,17 @@ class EngineCLI:
         parts = input.split(" ")
         cmd = parts[0]
         if cmd in self.cli_command_lookup:
-            self.cli_command_lookup[cmd]()
+            self.cli_command_lookup[cmd](self)
             return True
         else:
             return False
 
     # CLI COMMANDS
 
-    def clear_screen_cmd(self):
+    def clear_screen_cmd(self, temp: Any):
         self.clear_screen()
 
-    def exit_cmd(self):
+    def exit_cmd(self, temp: Any):
         sys.exit(0)
 
     def register_default_cli_commands(self):
@@ -212,6 +212,11 @@ async def main():
     chat.register_prompt_command(DummyEngineConfirmationInput, YesNoPrompt)
     chat.register_component_event(DummyEngineToolResult, ToolComponent)
     chat.clear_screen()
+
+    def a_command(cli: Any):
+        cli.update_status(DummyEngineStatusUpdate(status="a command"))
+
+    chat.register_cli_command("test", a_command)
     await chat.main()
 
 

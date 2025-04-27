@@ -16,6 +16,7 @@ from llmgine.ui.cli.cli import EngineCLI
 from llmgine.ui.cli.components import CLIPrompt, EngineResultComponent
 from dataclasses import dataclass, field
 
+
 @dataclass
 class ToolChatEngineCommand(Command):
     """Command for the Tool Chat Engine."""
@@ -28,6 +29,7 @@ class ToolChatEngineStatusEvent(Event):
     """Event emitted when the status of the engine changes."""
 
     status: str = ""
+
 
 @dataclass
 class ToolChatEngineToolResultEVent(Event):
@@ -64,7 +66,6 @@ class ToolChatEngine:
         self.tool_manager = ToolManager(
             engine_id=self.engine_id, session_id=self.session_id, llm_model_name="openai"
         )
-
 
     async def handle_command(self, command: ToolChatEngineCommand) -> CommandResult:
         """Handle a prompt command following OpenAI tool usage pattern.
@@ -138,7 +139,7 @@ class ToolChatEngine:
                                 status="executing tool", session_id=self.session_id
                             )
                         )
-                        
+
                         result = await self.tool_manager.execute_tool_call(tool_call_obj)
 
                         # Convert result to string if needed for history
@@ -210,6 +211,7 @@ class ToolChatEngine:
 async def main():
     from tools_gallery.test_tools import get_weather
     from llmgine.ui.cli.components import ToolComponent
+
     await MessageBus().start()
     cli = EngineCLI("test")
     engine = ToolChatEngine(session_id="test")
