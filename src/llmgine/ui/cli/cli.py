@@ -81,7 +81,8 @@ class EngineCLI:
                 continue
 
             result = await self.bus.execute(
-                self.engine_command(prompt=user_input, session_id=self.session_id)
+                self.engine_command(
+                    prompt=user_input, session_id=self.session_id)
             )
             if result.success:
                 self.components.append(self.engine_result_component(result))
