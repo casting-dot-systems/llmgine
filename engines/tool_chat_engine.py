@@ -1,20 +1,20 @@
-import asyncio
-import json
 import uuid
-from dataclasses import dataclass
-from typing import Any
+import os
+import json
+import asyncio
+from typing import Any, Dict, List, Optional
 
 from llmgine.bus.bus import MessageBus
 from llmgine.llm.context.memory import SimpleChatHistory
-from llmgine.llm.models.openai_models import Gpt41Mini
+from llmgine.llm.models.openai_models import Gpt41Mini, Gpt_4o_Mini_Latest
 from llmgine.llm.providers.providers import Providers
 from llmgine.llm.tools.tool_manager import ToolManager
-from llmgine.llm.tools.toolCall import ToolCall
+from llmgine.llm.tools.types import ToolCall
 from llmgine.messages.commands import Command, CommandResult
 from llmgine.messages.events import Event
 from llmgine.ui.cli.cli import EngineCLI
-from llmgine.ui.cli.components import EngineResultComponent
-
+from llmgine.ui.cli.components import CLIPrompt, EngineResultComponent
+from dataclasses import dataclass, field
 
 @dataclass
 class ToolChatEngineCommand(Command):
@@ -28,7 +28,6 @@ class ToolChatEngineStatusEvent(Event):
     """Event emitted when the status of the engine changes."""
 
     status: str = ""
-
 
 @dataclass
 class ToolChatEngineToolResultEVent(Event):
@@ -65,6 +64,7 @@ class ToolChatEngine:
         self.tool_manager = ToolManager(
             engine_id=self.engine_id, session_id=self.session_id, llm_model_name="openai"
         )
+
 
     async def handle_command(self, command: ToolChatEngineCommand) -> CommandResult:
         """Handle a prompt command following OpenAI tool usage pattern.
@@ -138,7 +138,7 @@ class ToolChatEngine:
                                 status="executing tool", session_id=self.session_id
                             )
                         )
-
+                        
                         result = await self.tool_manager.execute_tool_call(tool_call_obj)
 
                         # Convert result to string if needed for history
@@ -164,7 +164,7 @@ class ToolChatEngine:
                         )
 
                     except Exception as e:
-                        error_msg = f"Error executing tool {tool_call_obj.name}: {e!s}"
+                        error_msg = f"Error executing tool {tool_call_obj.name}: {str(e)}"
                         print(error_msg)  # Debug print
                         # Store error result in history
                         self.context_manager.store_tool_call_result(
@@ -208,9 +208,8 @@ class ToolChatEngine:
 
 
 async def main():
-    from llmgine.ui.cli.components import ToolComponent
     from tools.test_tools import get_weather
-
+    from llmgine.ui.cli.components import ToolComponent
     await MessageBus().start()
     cli = EngineCLI("test")
     engine = ToolChatEngine(session_id="test")
