@@ -37,7 +37,7 @@ class Gpt41Mini:
 
     def __init__(self, provider: Providers) -> None:
         self.generate = None
-        self.model = "gpt-4.1-mini-2025-04-14"
+        self.model = "gpt-4.1"
         self.api_key = os.getenv("OPENAI_API_KEY")
         self.provider = self.__getProvider(provider)
 

@@ -20,12 +20,120 @@
     "sentence_index": 2
   },
   {
-    "sentence": "I especially love projects where I can see tangible outcomes theres something super satisfying about seeing things work because of what I built.",
+    "sentence": "I especially love projects where I can see tangible outcomes theres something super satisfying about seeing things work because of what I built",
     "context": [
       "Im Fairy",
       "Im a second-year Data Science student at the University of Melbourne, and I like to keep life busy and a little chaotic in the best way",
       "Im constantly bouncing between writing code (Java, Python, R, and some C thrown in), managing coursework, tutoring high school students (mostly English and Maths), and finding any excuse to bring creativity into my routine"
     ],
     "sentence_index": 3
+  },
+  {
+    "sentence": "At uni, Ive also been really involved in student clubs, particularly Robogals",
+    "context": [
+      "Im Fairy",
+      "Im a second-year Data Science student at the University of Melbourne, and I like to keep life busy and a little chaotic in the best way",
+      "Im constantly bouncing between writing code (Java, Python, R, and some C thrown in), managing coursework, tutoring high school students (mostly English and Maths), and finding any excuse to bring creativity into my routine",
+      "I especially love projects where I can see tangible outcomes theres something super satisfying about seeing things work because of what I built"
+    ],
+    "sentence_index": 4
+  },
+  {
+    "sentence": "Ive worked across a few roles: training new volunteers, building school partnerships, and holding executive positions as both treasurer and secretary",
+    "context": [
+      "Im Fairy",
+      "Im a second-year Data Science student at the University of Melbourne, and I like to keep life busy and a little chaotic in the best way",
+      "Im constantly bouncing between writing code (Java, Python, R, and some C thrown in), managing coursework, tutoring high school students (mostly English and Maths), and finding any excuse to bring creativity into my routine",
+      "I especially love projects where I can see tangible outcomes theres something super satisfying about seeing things work because of what I built",
+      "At uni, Ive also been really involved in student clubs, particularly Robogals"
+    ],
+    "sentence_index": 5
+  },
+  {
+    "sentence": "Its given me a good sense of how clubs actually function behind the scenes( budgeting, event planning, a lot of last-minute fixing), and how to collaborate across different teams",
+    "context": [
+      "Im Fairy",
+      "Im a second-year Data Science student at the University of Melbourne, and I like to keep life busy and a little chaotic in the best way",
+      "Im constantly bouncing between writing code (Java, Python, R, and some C thrown in), managing coursework, tutoring high school students (mostly English and Maths), and finding any excuse to bring creativity into my routine",
+      "I especially love projects where I can see tangible outcomes theres something super satisfying about seeing things work because of what I built",
+      "At uni, Ive also been really involved in student clubs, particularly Robogals",
+      "Ive worked across a few roles: training new volunteers, building school partnerships, and holding executive positions as both treasurer and secretary"
+    ],
+    "sentence_index": 6
+  },
+  {
+    "sentence": "Definitely taught me how to work with all sorts of people and how to take initiative when things get messy (which they usually do)",
+    "context": [
+      "Im Fairy",
+      "Im a second-year Data Science student at the University of Melbourne, and I like to keep life busy and a little chaotic in the best way",
+      "Im constantly bouncing between writing code (Java, Python, R, and some C thrown in), managing coursework, tutoring high school students (mostly English and Maths), and finding any excuse to bring creativity into my routine",
+      "I especially love projects where I can see tangible outcomes theres something super satisfying about seeing things work because of what I built",
+      "At uni, Ive also been really involved in student clubs, particularly Robogals",
+      "Ive worked across a few roles: training new volunteers, building school partnerships, and holding executive positions as both treasurer and secretary",
+      "Its given me a good sense of how clubs actually function behind the scenes( budgeting, event planning, a lot of last-minute fixing), and how to collaborate across different teams"
+    ],
+    "sentence_index": 7
+  },
+  {
+    "sentence": "Im also in that very relatable phase of trying to juggle it all: learning, working, social life, fitness, and downtime",
+    "context": [
+      "Im Fairy",
+      "Im a second-year Data Science student at the University of Melbourne, and I like to keep life busy and a little chaotic in the best way",
+      "Im constantly bouncing between writing code (Java, Python, R, and some C thrown in), managing coursework, tutoring high school students (mostly English and Maths), and finding any excuse to bring creativity into my routine",
+      "I especially love projects where I can see tangible outcomes theres something super satisfying about seeing things work because of what I built",
+      "At uni, Ive also been really involved in student clubs, particularly Robogals",
+      "Ive worked across a few roles: training new volunteers, building school partnerships, and holding executive positions as both treasurer and secretary",
+      "Its given me a good sense of how clubs actually function behind the scenes( budgeting, event planning, a lot of last-minute fixing), and how to collaborate across different teams",
+      "Definitely taught me how to work with all sorts of people and how to take initiative when things get messy (which they usually do)"
+    ],
+    "sentence_index": 8
+  },
+  {
+    "sentence": "Still figuring it out",
+    "context": [
+      "Im Fairy",
+      "Im a second-year Data Science student at the University of Melbourne, and I like to keep life busy and a little chaotic in the best way",
+      "Im constantly bouncing between writing code (Java, Python, R, and some C thrown in), managing coursework, tutoring high school students (mostly English and Maths), and finding any excuse to bring creativity into my routine",
+      "I especially love projects where I can see tangible outcomes theres something super satisfying about seeing things work because of what I built",
+      "At uni, Ive also been really involved in student clubs, particularly Robogals",
+      "Ive worked across a few roles: training new volunteers, building school partnerships, and holding executive positions as both treasurer and secretary",
+      "Its given me a good sense of how clubs actually function behind the scenes( budgeting, event planning, a lot of last-minute fixing), and how to collaborate across different teams",
+      "Definitely taught me how to work with all sorts of people and how to take initiative when things get messy (which they usually do)",
+      "Im also in that very relatable phase of trying to juggle it all: learning, working, social life, fitness, and downtime"
+    ],
+    "sentence_index": 9
+  },
+  {
+    "sentence": "Ive been trying to stick to a gym routine and find more balance in my days, but lets be real, its not always consistent",
+    "context": [
+      "Im Fairy",
+      "Im a second-year Data Science student at the University of Melbourne, and I like to keep life busy and a little chaotic in the best way",
+      "Im constantly bouncing between writing code (Java, Python, R, and some C thrown in), managing coursework, tutoring high school students (mostly English and Maths), and finding any excuse to bring creativity into my routine",
+      "I especially love projects where I can see tangible outcomes theres something super satisfying about seeing things work because of what I built",
+      "At uni, Ive also been really involved in student clubs, particularly Robogals",
+      "Ive worked across a few roles: training new volunteers, building school partnerships, and holding executive positions as both treasurer and secretary",
+      "Its given me a good sense of how clubs actually function behind the scenes( budgeting, event planning, a lot of last-minute fixing), and how to collaborate across different teams",
+      "Definitely taught me how to work with all sorts of people and how to take initiative when things get messy (which they usually do)",
+      "Im also in that very relatable phase of trying to juggle it all: learning, working, social life, fitness, and downtime",
+      "Still figuring it out"
+    ],
+    "sentence_index": 10
+  },
+  {
+    "sentence": "That said, Ive learned to enjoy the chaos a little and just keep showing up",
+    "context": [
+      "Im Fairy",
+      "Im a second-year Data Science student at the University of Melbourne, and I like to keep life busy and a little chaotic in the best way",
+      "Im constantly bouncing between writing code (Java, Python, R, and some C thrown in), managing coursework, tutoring high school students (mostly English and Maths), and finding any excuse to bring creativity into my routine",
+      "I especially love projects where I can see tangible outcomes theres something super satisfying about seeing things work because of what I built",
+      "At uni, Ive also been really involved in student clubs, particularly Robogals",
+      "Ive worked across a few roles: training new volunteers, building school partnerships, and holding executive positions as both treasurer and secretary",
+      "Its given me a good sense of how clubs actually function behind the scenes( budgeting, event planning, a lot of last-minute fixing), and how to collaborate across different teams",
+      "Definitely taught me how to work with all sorts of people and how to take initiative when things get messy (which they usually do)",
+      "Im also in that very relatable phase of trying to juggle it all: learning, working, social life, fitness, and downtime",
+      "Still figuring it out",
+      "Ive been trying to stick to a gym routine and find more balance in my days, but lets be real, its not always consistent"
+    ],
+    "sentence_index": 11
   }
 ]

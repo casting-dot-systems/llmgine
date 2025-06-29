@@ -10,9 +10,8 @@ from llmgine.messages.commands import Command, CommandResult
 from llmgine.bus.bus import MessageBus
 from llmgine.messages.events import Event
 
-# Prompt file paths
 PROMPT_PATHS = {
-    "selection_prompt": "prompts/selection_prompt.md",
+    "selection_prompt": "prompts/selection_new.md",
     "disambiguation_prompt": "prompts/disambiguation_prompt.md",
     "decomposition_prompt": "prompts/decomposition_prompt.md"
 }
@@ -68,52 +67,57 @@ class FactExtractorEngine:
             await self.bus.publish(
                 FactExtractorEngineStatusEvent(status=f"Analyzing sentence {data['sentence_index'] + 1} of {len(sentence_data)}...", session_id=self.session_id)
             )
-            selection_context = [
-                {"role": "system", "content": self.system_prompt["selection_prompt"]},
+            disambiguation_context = [
+                {"role": "system", "content": self.system_prompt["disambiguation_prompt"]},
                 {"role": "user", "content": sentence_prompt},
             ]
-            selection_response = await self.model.generate(selection_context)
+            disambiguation_response = await self.model.generate(disambiguation_context)
+            # output = f"Original text: {sentence_prompt}\nDisambiguation: {disambiguation_response.content}"
+            # results.append(output)
             
-            if "Contains a specific and verifiable proposition" in selection_response.content and "Does not contain a specific and verifiable proposition" not in selection_response.content:
-                await self.bus.publish(
-                    FactExtractorEngineStatusEvent(status=f"Extracting facts from sentence {data['sentence_index'] + 1}...", session_id=self.session_id)
-                )
-                disambiguation_context = [
-                    {"role": "system", "content": self.system_prompt["disambiguation_prompt"]},
-                    {"role": "user", "content": sentence_prompt},
-                ]
-                disambiguation_response = await self.model.generate(disambiguation_context)
-            
-                if disambiguation_response.content.strip():
-                    decomposition_context = [
-                        {"role": "system", "content": self.system_prompt["decomposition_prompt"]},
-                        {"role": "user", "content": f"Original text: {sentence_prompt}\nDisambiguated: {disambiguation_response.content}"},
-                    ]
-                    decomposition_response = await self.model.generate(decomposition_context)
-                    
-                    if decomposition_response.content.strip():
-                        results.append({
-                            "original": data["sentence"],
-                            "facts": decomposition_response.content
-                        })
-        
-        if not results:
-            print("finished")
             await self.bus.publish(
-                FactExtractorEngineStatusEvent(status="finished", session_id=self.session_id)
+                FactExtractorEngineStatusEvent(status=f"Extracting facts from sentence {data['sentence_index'] + 1}...", session_id=self.session_id)
             )
-            return "No verifiable facts found in the text."
+            decomposition_context = [
+                {"role": "system", "content": self.system_prompt["decomposition_prompt"]},
+                {"role": "user", "content": f"Original text: {sentence_prompt}\nDisambiguation: {disambiguation_response.content}"},
+            ]
+            decomposition_response = await self.model.generate(decomposition_context)
+            # output = f"Original text: {sentence_prompt}\n\nDisambiguation: {disambiguation_response.content}\n\nDecomposed: {decomposition_response.content}\n\n=========================\n\n"
+            # results.append(output)
+        
+            selection_context = [
+                {"role": "system", "content": self.system_prompt["selection_prompt"]},
+                {"role": "user", "content": f"Sentences: {decomposition_response.content}"},
+            ]
+            selection_response = await self.model.generate(selection_context)
+            output = f"Original text: {data['sentence']}\n\nDisambiguation: {disambiguation_response.content}\n\nDecomposed: {decomposition_response.content}\n\nSelection: {selection_response.content}\n\n=========================\n\n"
+            results.append(output)
+            
+            # if selection_response.content.strip():
+            #     results.append({
+            #         "original": data["sentence"],
+            #         "facts": selection_response.content
+            #     })
+        
+        # if not results:
+        #     print("finished")
+        #     await self.bus.publish(
+        #         FactExtractorEngineStatusEvent(status="finished", session_id=self.session_id)
+        #     )
+        #     return "No verifiable facts found in the text."
     
-        formatted_results = ["Extracted Facts:"]
-        for result in results:
-            formatted_results.append(f"\nFrom: {result['original']}")
-            formatted_results.append(f"Facts: {result['facts']}")
-            formatted_results.append("-" * 40)
+        # formatted_results = ["Extracted Facts:"]
+        # for result in results:
+        #     formatted_results.append(f"\nFrom: {result['original']}")
+        #     formatted_results.append(f"Facts: {result['facts']}")
+        #     formatted_results.append("-" * 40)
 
         await self.bus.publish(
             FactExtractorEngineStatusEvent(status="finished", session_id=self.session_id)
         )
-        return "\n".join(formatted_results)
+        return "\n".join(results)
+        # return "\n".join(formatted_results)
 
 async def useFactExtractorEngine(
     prompt: str, model, system_prompt: Optional[dict[str, str]] = None

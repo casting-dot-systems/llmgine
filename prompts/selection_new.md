@@ -1,0 +1,1 @@
+Retain ONLY sentences that include propositions that describe OBVIOUSLY explict actions, tangible states, or externally observable efforts. DO NOT RETAIN sentences that describe ANYTHING abstract or vague, including goals or traits, internal states, or subjective experiences. Output your answers as edited sentences. 

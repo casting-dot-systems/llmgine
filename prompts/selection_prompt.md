@@ -1,4 +1,4 @@
-You are an assistant to a fact - checker . You will be given a question , which was
+You will be given a sentence, which was
 asked about a source text ( it may be referred to by other names , e . g . , a
 dataset ) . You will also be given an excerpt from a response to the question . If
 it contains "[...]" , this means that you are NOT seeing all sentences in the
@@ -86,7 +86,7 @@ Sentence :
     4. identify if the sentence can be broken down and identify if each statement is a preference, properties, claims -> 
     5. or events only if it contains a specific and verifiable proposition : reflect on whether any changes are needed to ensure 
        that the entire sentence only contains verifiable information 
-    ) :
+) :
 < insert >
 Final submission:
 < insert 'Contains a specific and verifiable proposition ' or 'Does NOT contain a specific and verifiable proposition '>
