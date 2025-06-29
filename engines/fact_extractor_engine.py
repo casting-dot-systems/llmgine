@@ -9,11 +9,13 @@ from llmgine.llm.models.model import Model
 from llmgine.messages.commands import Command, CommandResult
 from llmgine.bus.bus import MessageBus
 from llmgine.messages.events import Event
+import ast
 
 PROMPT_PATHS = {
     "selection_prompt": "prompts/selection_new.md",
     "disambiguation_prompt": "prompts/disambiguation_prompt.md",
-    "decomposition_prompt": "prompts/decomposition_prompt.md"
+    "decomposition_prompt": "prompts/decomposition_prompt.md",
+    "factextraction_prompt": "prompts/factextraction_prompt.md"
 }
 
 def load_prompts() -> dict[str, str]:
@@ -67,32 +69,43 @@ class FactExtractorEngine:
             await self.bus.publish(
                 FactExtractorEngineStatusEvent(status=f"Analyzing sentence {data['sentence_index'] + 1} of {len(sentence_data)}...", session_id=self.session_id)
             )
-            disambiguation_context = [
-                {"role": "system", "content": self.system_prompt["disambiguation_prompt"]},
+            fact_extraction_context = [
+                {"role": "system", "content": self.system_prompt["factextraction_prompt"]},
                 {"role": "user", "content": sentence_prompt},
             ]
-            disambiguation_response = await self.model.generate(disambiguation_context)
-            # output = f"Original text: {sentence_prompt}\nDisambiguation: {disambiguation_response.content}"
-            # results.append(output)
+            fact_extraction_response = await self.model.generate(fact_extraction_context, temperature=0.0)
+            try:
+                fact_extraction_response = ast.literal_eval(fact_extraction_response.content)
+            except Exception as e:
+                print(f"Error: {e}")
+                print(f"Fact extraction response: {fact_extraction_response.content}")
+                continue
+            results.extend(fact_extraction_response)
+
+            # disambiguation_context = [
+            #     {"role": "system", "content": self.system_prompt["disambiguation_prompt"]},
+            #     {"role": "user", "content": sentence_prompt},
+            # ]
+            # disambiguation_response = await self.model.generate(disambiguation_context)
             
-            await self.bus.publish(
-                FactExtractorEngineStatusEvent(status=f"Extracting facts from sentence {data['sentence_index'] + 1}...", session_id=self.session_id)
-            )
-            decomposition_context = [
-                {"role": "system", "content": self.system_prompt["decomposition_prompt"]},
-                {"role": "user", "content": f"Original text: {sentence_prompt}\nDisambiguation: {disambiguation_response.content}"},
-            ]
-            decomposition_response = await self.model.generate(decomposition_context)
-            # output = f"Original text: {sentence_prompt}\n\nDisambiguation: {disambiguation_response.content}\n\nDecomposed: {decomposition_response.content}\n\n=========================\n\n"
-            # results.append(output)
+            # await self.bus.publish(
+            #     FactExtractorEngineStatusEvent(status=f"Extracting facts from sentence {data['sentence_index'] + 1}...", session_id=self.session_id)
+            # )
+            # decomposition_context = [
+            #     {"role": "system", "content": self.system_prompt["decomposition_prompt"]},
+            #     {"role": "user", "content": f"Original text: {sentence_prompt}\nDisambiguation: {disambiguation_response.content}"},
+            # ]
+            # decomposition_response = await self.model.generate(decomposition_context)
+            # # output = f"Original text: {sentence_prompt}\n\nDisambiguation: {disambiguation_response.content}\n\nDecomposed: {decomposition_response.content}\n\n=========================\n\n"
+            # # results.append(output)
         
-            selection_context = [
-                {"role": "system", "content": self.system_prompt["selection_prompt"]},
-                {"role": "user", "content": f"Sentences: {decomposition_response.content}"},
-            ]
-            selection_response = await self.model.generate(selection_context)
-            output = f"Original text: {data['sentence']}\n\nDisambiguation: {disambiguation_response.content}\n\nDecomposed: {decomposition_response.content}\n\nSelection: {selection_response.content}\n\n=========================\n\n"
-            results.append(output)
+            # selection_context = [
+            #     {"role": "system", "content": self.system_prompt["selection_prompt"]},
+            #     {"role": "user", "content": f"Sentences: {decomposition_response.content}"},
+            # ]
+            # selection_response = await self.model.generate(selection_context)
+            # output = f"Original text: {data['sentence']}\n\nDisambiguation: {disambiguation_response.content}\n\nDecomposed: {decomposition_response.content}\n\nSelection: {selection_response.content}\n\n=========================\n\n"
+            # results.append(output)
             
             # if selection_response.content.strip():
             #     results.append({
