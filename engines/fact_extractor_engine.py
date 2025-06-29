@@ -1,38 +1,51 @@
-import json
-import uuid
-import asyncio
-
-from llmgine.llm.models.openai_models import Gpt41Mini
-from llmgine.llm.providers.providers import Providers
-from llmgine.bus.bus import MessageBus
-from llmgine.messages.commands import Command, CommandResult
-from llmgine.messages.events import Event
 from dataclasses import dataclass
 from typing import Optional
+import uuid
+import re
+import json
+import os
+from llmgine.llm.engine.engine import Engine
+from llmgine.llm.models.model import Model
+from llmgine.messages.commands import Command, CommandResult
+from llmgine.bus.bus import MessageBus
+from llmgine.messages.events import Event
 
-    
-@dataclass
-class EngineStatusEvent(Event):
-    status: str = ""
-    session_id: Optional[str] = None
+# Prompt file paths
+PROMPT_PATHS = {
+    "selection_prompt": "prompts/selection_prompt.md",
+    "disambiguation_prompt": "prompts/disambiguation_prompt.md",
+    "decomposition_prompt": "prompts/decomposition_prompt.md"
+}
+
+def load_prompts() -> dict[str, str]:
+    """Load all prompts from their respective files."""
+    return {
+        name: open(path, 'r', encoding='utf-8').read()
+        for name, path in PROMPT_PATHS.items()
+    }
 
 @dataclass
 class FactExtractorEngineCommand(Command):
     prompt: str = ""
 
 @dataclass
-class Engine:
-    model = Gpt41Mini(Providers.OPENAI)
-    system_prompt: Optional[str] = """You are an assistant to a fact - checker . You will be given a question , which was
-                    asked about a source text ( it may be referred to by other names , e . g . , a
-                    dataset ) . You will also be given an excerpt from a response to the question . If
-                    it contains "[...]" , this means that you are NOT seeing all sentences in the
-                    response . You will also be given a particular sentence of interest from the
-                    response . Your task is to determine whether this particular sentence contains at
-                    least one specific and verifiable proposition , and if so , to return a complete
-                    sentence that only contains verifiable information """
+class FactExtractorEngineStatusEvent(Event):
+    status: str = ""
+
+@dataclass
+class FactExtractorPromptCommand(Command):
+    prompt: str = ""
+
+@dataclass
+class FactExtractorEngine:
+    model: Model
+    system_prompt: Optional[dict[str, str]] = None
     session_id: Optional[str] = None
-    bus:  MessageBus = MessageBus()
+    bus: MessageBus = MessageBus()
+    
+    def __post_init__(self):
+        if self.system_prompt is None:
+            self.system_prompt = load_prompts()
     
     async def handle_command(self, command: FactExtractorEngineCommand) -> CommandResult:
         try:
@@ -42,61 +55,144 @@ class Engine:
             return CommandResult(success=False, error=str(e))
         
     async def execute(self, prompt: str) -> str:
-        self.bus = MessageBus()
-        if self.system_prompt:
-            context = [
-                {"role": "system", "content": self.system_prompt},
-                {"role": "user", "content": prompt},
-            ]
-        else:
-            context = [{"role": "user", "content": prompt}]
         await self.bus.publish(
-            EngineStatusEvent(status="Calling LLM", session_id=self.session_id)
+            FactExtractorEngineStatusEvent(status="Starting fact extraction...", session_id=self.session_id)
         )
-        response = await self.model.generate(context)
-        await self.bus.publish( 
-            EngineStatusEvent(status="finished", session_id=self.session_id)
-        )
-        return response.content
-
-    async def handle_fact_extraction(self, command: FactExtractorEngineCommand) -> CommandResult:
-        try:
-            result = await self.execute(command.prompt)
-            return CommandResult(success=True, result=result)
-        except Exception as e:
-            return CommandResult(success=False, error=str(e))
+        sentence_data = sentence_context(prompt)
+        
+        results = []
+        for data in sentence_data:
+            context_text = " ".join(data["context"])
+            sentence_prompt = f"Context: {context_text}\nSentence: {data['sentence']}"
+            
+            await self.bus.publish(
+                FactExtractorEngineStatusEvent(status=f"Analyzing sentence {data['sentence_index'] + 1} of {len(sentence_data)}...", session_id=self.session_id)
+            )
+            selection_context = [
+                {"role": "system", "content": self.system_prompt["selection_prompt"]},
+                {"role": "user", "content": sentence_prompt},
+            ]
+            selection_response = await self.model.generate(selection_context)
+            
+            if "Contains a specific and verifiable proposition" in selection_response.content and "Does not contain a specific and verifiable proposition" not in selection_response.content:
+                await self.bus.publish(
+                    FactExtractorEngineStatusEvent(status=f"Extracting facts from sentence {data['sentence_index'] + 1}...", session_id=self.session_id)
+                )
+                disambiguation_context = [
+                    {"role": "system", "content": self.system_prompt["disambiguation_prompt"]},
+                    {"role": "user", "content": sentence_prompt},
+                ]
+                disambiguation_response = await self.model.generate(disambiguation_context)
+            
+                if disambiguation_response.content.strip():
+                    decomposition_context = [
+                        {"role": "system", "content": self.system_prompt["decomposition_prompt"]},
+                        {"role": "user", "content": f"Original text: {sentence_prompt}\nDisambiguated: {disambiguation_response.content}"},
+                    ]
+                    decomposition_response = await self.model.generate(decomposition_context)
+                    
+                    if decomposition_response.content.strip():
+                        results.append({
+                            "original": data["sentence"],
+                            "facts": decomposition_response.content
+                        })
+        
+        if not results:
+            print("finished")
+            await self.bus.publish(
+                FactExtractorEngineStatusEvent(status="finished", session_id=self.session_id)
+            )
+            return "No verifiable facts found in the text."
     
-async def useEngine(
-    prompt: str, model, system_prompt: Optional[str] = None 
+        formatted_results = ["Extracted Facts:"]
+        for result in results:
+            formatted_results.append(f"\nFrom: {result['original']}")
+            formatted_results.append(f"Facts: {result['facts']}")
+            formatted_results.append("-" * 40)
+
+        await self.bus.publish(
+            FactExtractorEngineStatusEvent(status="finished", session_id=self.session_id)
+        )
+        return "\n".join(formatted_results)
+
+async def useFactExtractorEngine(
+    prompt: str, model, system_prompt: Optional[dict[str, str]] = None
 ):
     session_id = str(uuid.uuid4())
-    engine = Engine(model, system_prompt, session_id)
+    if system_prompt is None:
+        system_prompt = load_prompts()
+    engine = FactExtractorEngine(
+        model=model,
+        system_prompt=system_prompt,
+        session_id=session_id
+    )
     return await engine.execute(prompt)
-    
+
 async def main():
     from llmgine.ui.cli.cli import EngineCLI
     from llmgine.ui.cli.components import EngineResultComponent
     from llmgine.bootstrap import ApplicationConfig, ApplicationBootstrap
     from llmgine.llm.models.openai_models import Gpt41Mini
     from llmgine.llm.providers.providers import Providers
-    
+
     config = ApplicationConfig(enable_console_handler=False)
     bootstrap = ApplicationBootstrap(config)
     await bootstrap.bootstrap()
-    
-    engine = Engine(
-        Gpt41Mini(Providers.OPENAI),
-        "You are a personal fact extractor.",
-        "fact_extractor_session",
+    engine = FactExtractorEngine(
+        Gpt41Mini(Providers.OPENAI), session_id="test"
     )
-
-    bus = MessageBus()
-    cli = EngineCLI("fact_extractor_session")
+    cli = EngineCLI("test")
     cli.register_engine(engine)
-    cli.register_engine_command(FactExtractorEngineCommand, engine.handle_fact_extraction)
+    cli.register_engine_command(FactExtractorEngineCommand)
     cli.register_engine_result_component(EngineResultComponent)
-    cli.register_loading_event(EngineStatusEvent)
+    cli.register_loading_event(FactExtractorEngineStatusEvent)
     await cli.main()
+
+def sentence_context(texts: str, output_file: str = "sentence_contexts.json") -> list[dict]:
+    """
+    Split text into sentences and create a JSON file with each sentence and its preceding context.
     
+    Args:
+        texts (str): Either the text content directly or path to the input text file
+        output_file (str): Path to save the JSON file (default: sentence_contexts.json)
+    
+    Returns:
+        list[dict]: List of dictionaries containing sentences and their contexts
+    """
+    try:
+        if os.path.isfile(texts):
+            with open(texts, 'r', encoding='utf-8') as f:
+                text = f.read()
+        else:
+            text = texts
+        
+        sentences = [s.strip() for s in text.replace('\n', ' ').split('. ') if s.strip()]
+        
+        i = 1
+        sentence_data = []
+        for i, sentence in enumerate(sentences):
+            context = sentences[:i]  
+            sentence_data.append({
+                "sentence": sentence,
+                "context": context,
+                "sentence_index": i
+            })
+        
+        with open(output_file, 'w', encoding='utf-8') as f:
+            json.dump(sentence_data, f, indent=2, ensure_ascii=False)
+        
+        return sentence_data
+    except FileNotFoundError:
+        print(f"Error: Could not find file {texts}")
+        return []
+    except Exception as e:
+        print(f"Error processing text: {str(e)}")
+        return []
+
 if __name__ == "__main__":
+    import asyncio
     asyncio.run(main())
+
+
+
+

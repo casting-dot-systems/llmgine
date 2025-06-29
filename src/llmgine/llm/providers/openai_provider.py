@@ -1,15 +1,15 @@
 """OpenAI provider implementation."""
 
-from typing import Any, Dict, List, Literal, Optional, Union
 import uuid
+from typing import Any, Dict, List, Literal, Optional, Union
 
-from llmgine.llm.providers.events import LLMCallEvent, LLMResponseEvent
-from llmgine.llm.providers.providers import Providers
 from openai import AsyncOpenAI
 from openai.types.chat import ChatCompletion
 
 from llmgine.bus.bus import MessageBus
 from llmgine.llm.providers import LLMProvider
+from llmgine.llm.providers.events import LLMCallEvent, LLMResponseEvent
+from llmgine.llm.providers.providers import Providers
 from llmgine.llm.providers.response import LLMResponse, ResponseTokens
 from llmgine.llm.tools.types import ToolCall
 

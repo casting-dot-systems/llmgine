@@ -337,7 +337,7 @@ class MessageBus:
             await self.publish(CommandResultEvent(command_result=failed_result))
             return failed_result
 
-    async def publish(self, event: Event) -> None:
+    async def publish(self, event: Event, await_processing: bool = True) -> None:
         """
         Publish an event onto the event queue.
         Args:
@@ -354,7 +354,8 @@ class MessageBus:
         except Exception as e:
             logger.error(f"Error queing event: {e}", exc_info=True)
         finally:
-            await self.ensure_events_processed()
+            if await_processing:
+                await self.ensure_events_processed()
 
     async def _process_events(self) -> None:
         """

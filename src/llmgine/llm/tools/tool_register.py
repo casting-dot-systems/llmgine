@@ -1,19 +1,19 @@
-import re
-import inspect
 import asyncio
-import os
 import importlib
+import inspect
 import logging
-from typing import List, Dict, Union, Optional, Type, Tuple
+import os
+import re
+from typing import Any, Dict, List, Tuple, Type
 
-from llmgine.llm.tools.tool import Tool, Parameter, ToolFunction, AsyncToolFunction
+from llmgine.llm.tools.tool import Parameter, Tool
+from llmgine.llm.tools.types import AsyncOrSyncToolFunction
 
 logger = logging.getLogger(__name__)
 
+
 class ToolRegister:
-    def register_tool(
-        self, function: Union[ToolFunction, AsyncToolFunction]
-    ) -> Tuple[str, Tool]:
+    def register_tool(self, function: AsyncOrSyncToolFunction) -> Tuple[str, Tool]:
         """Register a function as a tool.
 
         Args:
@@ -22,14 +22,14 @@ class ToolRegister:
         Raises:
             ValueError: If the function has no description
         """
-        
+
         # Get the name, description, parameters, and async status of the function
         name = function.__name__
         description = self._get_function_description(function)
         parameters = self._get_function_parameters(function)
         is_async = asyncio.iscoroutinefunction(function)
 
-        tool = Tool(
+        tool: Tool = Tool(
             name=name,
             description=description,
             parameters=parameters,
@@ -37,7 +37,7 @@ class ToolRegister:
             is_async=is_async,
         )
 
-        return name, tool
+        return name, tool  # TODO can't we just return the tool?
 
     def register_tools(self, platform_list: List[str]) -> Dict[str, Tool]:
         """Register all relevant tools for a list of platforms. Completely independent from register_tool.
@@ -46,44 +46,51 @@ class ToolRegister:
             platform_list: A list of platform names
         """
 
-        tools = {}
+        tools: Dict[str, Tool] = {}
         for platform in platform_list:
             for function in self._get_functions_for_platform(platform):
                 name, tool = self.register_tool(function)
                 tools[name] = tool
+
         return tools
-    
-    def _get_functions_for_platform(self, platform: str) -> List[Union[ToolFunction, AsyncToolFunction]]:
-        """Get all functions for a specific platform. 
+
+    def _get_functions_for_platform(self, platform: str) -> List[AsyncOrSyncToolFunction]:
+        """Get all functions for a specific platform.
         The functions for 'platform' are stored in the folder 'platform_tools' with the file name '{platform.lower()}_tools.py',
         and in a variable called '{platform.upper()}_TOOLS'.
 
         Args:
             platform: The platform to get functions for
-            
+
         Returns:
             List of tool functions for the platform
         """
-        functions = []
+        functions: List[AsyncOrSyncToolFunction] = []
         platform_tools_dir = os.path.join(os.path.dirname(__file__), "platform_tools")
-        
+
         # Check directory for platform-specific files
         if os.path.exists(platform_tools_dir):
             for filename in os.listdir(platform_tools_dir):
-                if f'{platform.lower()}_tools' in filename.lower() and filename.endswith('.py'):
+                if f"{platform.lower()}_tools" in filename.lower() and filename.endswith(
+                    ".py"
+                ):
                     module_name = f"llmgine.llm.tools.platform_tools.{filename[:-3]}"
                     try:
                         module = importlib.import_module(module_name)
                         if hasattr(module, f"{platform.upper()}_TOOLS"):
                             functions.extend(getattr(module, f"{platform.upper()}_TOOLS"))
                         else:
-                            logger.warning(f"No tools found for {platform} in {module_name}")
+                            logger.warning(
+                                f"No tools found for {platform} in {module_name}"
+                            )
                     except ImportError as e:
-                        logger.error(f"When registering tools for {platform}, failed to import {module_name}: {e}")
-                        
+                        logger.error(
+                            f"When registering tools for {platform}, failed to import {module_name}: {e}"
+                        )
+
         return functions
 
-    def _get_function_description(self, function: Union[ToolFunction, AsyncToolFunction]) -> str:
+    def _get_function_description(self, function: AsyncOrSyncToolFunction) -> str:
         """Get the description of a function.
 
         Args:
@@ -102,11 +109,15 @@ class ToolRegister:
             description = desc_doc.group(1).strip()
             description = " ".join(line.strip() for line in description.split("\n"))
         else:
-            raise ValueError(f"Function '{function.__name__}' has no description provided")
-        
+            raise ValueError(
+                f"Function '{function.__name__}' has no description provided"
+            )
+
         return description
 
-    def _get_function_parameters(self, function: Union[ToolFunction, AsyncToolFunction]) -> List[Parameter]:
+    def _get_function_parameters(
+        self, function: AsyncOrSyncToolFunction
+    ) -> List[Parameter]:
         """Get the parameters of a function.
 
         Args:
@@ -119,6 +130,7 @@ class ToolRegister:
             ValueError: If the function has no parameters
         """
 
+        param_desc: str
 
         # Extract parameters from function signature
         sig = inspect.signature(function)
@@ -159,6 +171,7 @@ class ToolRegister:
             # If the parameter has a description in the Args section, use it
             if param_name in param_dict:
                 param_desc = param_dict[param_name]
+
             else:
                 raise ValueError(
                     f"Parameter '{param_name}' has no description in the Args section"
@@ -175,7 +188,7 @@ class ToolRegister:
 
         return parameters
 
-    def _annotation_to_json_type(self, annotation: Type) -> str:
+    def _annotation_to_json_type(self, annotation: Type[Any]) -> str:
         """Convert a Python type annotation to a JSON schema type.
 
         Args:

@@ -4,10 +4,10 @@ This module provides a way to parse tools into a format that can be used by
 any LLM.
 """
 
-from abc import ABC, abstractmethod
-from typing import Any, Dict, List, Optional, Type, Union
+from abc import abstractmethod
+from typing import Any, Dict
 
-from llmgine.llm.tools.types import Tool
+from llmgine.llm.tools.tool import Tool
 
 
 class ToolParser:

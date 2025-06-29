@@ -66,9 +66,11 @@ class EngineCLI:
     def register_engine(self, engine: Any):
         self.engine = engine
 
-    def register_engine_command(self, command: Type[Command], engine_function: Callable):
+    def register_engine_command(self, command: Type[Command]):
         self.engine_command = command
-        self.bus.register_command_handler(command, engine_function, self.session_id)
+        self.bus.register_command_handler(
+            command, self.engine.handle_command, self.session_id
+        )
 
     def register_engine_result_component(self, component: Type[CLIComponent]):
         self.engine_result_component = component
@@ -205,7 +207,7 @@ async def main():
     chat = EngineCLI("123")
     await MessageBus().start()
     chat.register_engine(engine)
-    chat.register_engine_command(DummyEngineCommand)
+    chat.register_engine_command(DummyEngineCommand, engine.handle_command)
     chat.register_engine_result_component(EngineResultComponent)
     chat.register_loading_event(DummyEngineStatusUpdate)
     chat.register_prompt_command(DummyEngineConfirmationInput, YesNoPrompt)

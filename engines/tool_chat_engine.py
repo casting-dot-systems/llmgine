@@ -208,14 +208,14 @@ class ToolChatEngine:
 
 
 async def main():
-    from tools_gallery.test_tools import get_weather
+    from tools.test_tools import get_weather
     from llmgine.ui.cli.components import ToolComponent
     await MessageBus().start()
     cli = EngineCLI("test")
     engine = ToolChatEngine(session_id="test")
     await engine.register_tool(get_weather)
     cli.register_engine(engine)
-    cli.register_engine_command(ToolChatEngineCommand)
+    cli.register_engine_command(ToolChatEngineCommand, engine.handle_command)
     cli.register_engine_result_component(EngineResultComponent)
     cli.register_loading_event(ToolChatEngineStatusEvent)
     cli.register_component_event(ToolChatEngineToolResultEVent, ToolComponent)

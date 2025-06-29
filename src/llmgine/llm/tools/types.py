@@ -1,6 +1,14 @@
 import asyncio
 from dataclasses import dataclass
-from typing import Any, Callable, Dict, List, Union
+from typing import Any, Callable, Dict, Union
+
+# Type for tool function
+ToolFunction = Callable[..., Any]
+AsyncToolFunction = Callable[..., "asyncio.Future[Any]"]
+AsyncOrSyncToolFunction = Union[ToolFunction, AsyncToolFunction]
+
+
+# TODO this is a class not really a type probably put into seperate file
 
 
 @dataclass
@@ -18,66 +26,4 @@ class ToolCall:
             "id": self.id,
             "type": self.type,
             "function": {"name": self.name, "arguments": self.arguments},
-        }
-
-
-@dataclass
-class Parameter:
-    """A parameter for a tool.
-
-    Attributes:
-        name: The name of the parameter
-        description: A description of the parameter
-        type: The type of the parameter
-        required: Whether the parameter is required
-    """
-    name: str
-    description: str
-    type: str
-    required: bool = False
-
-    def __init__(self, name: str, description: str, type: str, required: bool = False):
-        self.name = name
-        self.description = description or ""
-        self.type = type
-        self.required = required
-
-    def to_dict(self) -> Dict[str, Any]:
-        return {
-            "name": self.name,
-            "description": self.description,
-            "type": self.type,
-            "required": self.required
-        }
-
-
-# Type for tool function
-ToolFunction = Callable[..., Any]
-AsyncToolFunction = Callable[..., "asyncio.Future[Any]"]
-
-
-@dataclass
-class Tool:
-    """Contains all information about a tool.
-
-    Attributes:
-        name: The name of the tool
-        description: A description of what the tool does
-        parameters: JSON schema for the tool parameters
-        function: The function to call when the tool is invoked
-        is_async: Whether the function is asynchronous
-    """
-    name: str
-    description: str
-    parameters: List[Parameter]
-    parameters: List[Parameter]
-    function: Union[ToolFunction, AsyncToolFunction]
-    is_async: bool = False
-
-    def to_dict(self) -> Dict[str, Any]:
-        return {
-            "name": self.name,
-            "description": self.description,
-            "parameters": [param.to_dict() for param in self.parameters],
-            "is_async": self.is_async
         }

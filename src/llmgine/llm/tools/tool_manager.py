@@ -6,23 +6,23 @@ that can be called by language models.
 
 import json
 import uuid
-from typing import Any, Dict, List, Optional, Type
+from typing import Any, Dict, List, Optional
 
 from llmgine.bus.bus import MessageBus
 from llmgine.llm.tools.tool import Tool
-from llmgine.llm.tools.tool_register import ToolRegister
-from llmgine.llm.tools.tool_parser import (
-    OpenAIToolParser,
-    ClaudeToolParser,
-    DeepSeekToolParser,
-)
-from llmgine.llm.tools.types import Parameter, Tool, ToolCall, ToolFunction
 from llmgine.llm.tools.tool_events import (
-    ToolRegisterEvent,
     ToolCompiledEvent,
     ToolExecuteResultEvent,
+    ToolRegisterEvent,
 )
-
+from llmgine.llm.tools.tool_parser import (
+    ClaudeToolParser,
+    DeepSeekToolParser,
+    OpenAIToolParser,
+    ToolParser,
+)
+from llmgine.llm.tools.tool_register import ToolRegister
+from llmgine.llm.tools.types import AsyncOrSyncToolFunction, ToolCall
 
 
 class ToolManager:
@@ -33,21 +33,25 @@ class ToolManager:
     ):
         """Initialize the tool manager."""
         self.tool_manager_id = str(uuid.uuid4())
-        self.engine_id = engine_id
-        self.session_id = session_id
-        self.message_bus = MessageBus()
+        self.engine_id: str = engine_id  # TODO make type
+        self.session_id: str = session_id  # TODO amke type
+        self.message_bus: MessageBus = MessageBus()
         self.tools: Dict[str, Tool] = {}
-        self.__tool_parser = self._get_parser(llm_model_name)
-        self.__tool_register = ToolRegister()
+        self.__tool_parser: ToolParser = self._get_parser(llm_model_name)
+        self.__tool_register: ToolRegister = ToolRegister()
 
-    async def register_tool(self, tool: Tool):
-        """Register a tool, tool manager will publish the tool 
+    async def register_tool(self, tool_function: AsyncOrSyncToolFunction) -> None:
+        """Register a tool, tool manager will publish the tool
             registration event and hand it to the tool register.
 
         Args:
             tool: The tool to register
         """
-        name, tool = self.__tool_register.register_tool(tool)
+
+        name: str
+        tool: Tool
+        name, tool = self.__tool_register.register_tool(tool_function)
+
         self.tools[name] = tool
 
         # Publish the tool registration event
@@ -66,7 +70,7 @@ class ToolManager:
         Args:
             platform_list: A list of platform names
         """
-        
+
         # Register tools for each platform
         for name, tool in self.__tool_register.register_tools(platform_list).items():
             self.tools[name] = tool
@@ -102,7 +106,7 @@ class ToolManager:
 
         return [self.__tool_parser.parse_tool(tool) for tool in tools]
 
-    async def execute_tool_call(self, tool_call: ToolCall) -> Any:
+    async def execute_tool_call(self, tool_call: ToolCall) -> Optional[dict[str, Any]]:
         """Execute a tool from a ToolCall object.
 
         Args:
@@ -177,12 +181,12 @@ class ToolManager:
                 )
             )
 
-            return f"ERROR: {str(e)}"
+            return f"ERROR: {e!s}"
 
-    def _get_parser(self, llm_model_name: Optional[str] = None):
+    def _get_parser(self, llm_model_name: Optional[str] = None) -> ToolParser:
         """Get the appropriate tool parser based on the LLM model name."""
         if llm_model_name == "openai":
-            tool_parser = OpenAIToolParser()
+            tool_parser: ToolParser = OpenAIToolParser()
         elif llm_model_name == "claude":
             tool_parser = ClaudeToolParser()
         elif llm_model_name == "deepseek":

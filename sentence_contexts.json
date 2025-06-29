@@ -1,0 +1,31 @@
+[
+  {
+    "sentence": "Im Fairy",
+    "context": [],
+    "sentence_index": 0
+  },
+  {
+    "sentence": "Im a second-year Data Science student at the University of Melbourne, and I like to keep life busy and a little chaotic in the best way",
+    "context": [
+      "Im Fairy"
+    ],
+    "sentence_index": 1
+  },
+  {
+    "sentence": "Im constantly bouncing between writing code (Java, Python, R, and some C thrown in), managing coursework, tutoring high school students (mostly English and Maths), and finding any excuse to bring creativity into my routine",
+    "context": [
+      "Im Fairy",
+      "Im a second-year Data Science student at the University of Melbourne, and I like to keep life busy and a little chaotic in the best way"
+    ],
+    "sentence_index": 2
+  },
+  {
+    "sentence": "I especially love projects where I can see tangible outcomes theres something super satisfying about seeing things work because of what I built.",
+    "context": [
+      "Im Fairy",
+      "Im a second-year Data Science student at the University of Melbourne, and I like to keep life busy and a little chaotic in the best way",
+      "Im constantly bouncing between writing code (Java, Python, R, and some C thrown in), managing coursework, tutoring high school students (mostly English and Maths), and finding any excuse to bring creativity into my routine"
+    ],
+    "sentence_index": 3
+  }
+]

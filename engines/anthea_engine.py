@@ -9,19 +9,19 @@ from llmgine.messages.events import Event
 
 
 @dataclass
-class AntheaEngineCommand(Command):
+class FactExtractorEngineCommand(Command):
     prompt: str = ""
     
 @dataclass
-class AntheaEngineStatusEvent(Event):
+class FactExtractorEngineStatusEvent(Event):
     status: str = ""
     
 @dataclass
-class AntheaPromptCommand(Command):
+class FactExtractorPromptCommand(Command):
     prompt: str = ""
 
 @dataclass
-class AntheaEngine:
+class FactExtractorEngine:
     model: Model
     system_prompt: Optional[str] = """You are an assistant to a fact - checker . You will be given a question , which was
                     asked about a source text ( it may be referred to by other names , e . g . , a
@@ -34,7 +34,7 @@ class AntheaEngine:
     session_id: Optional[str] = None
     bus:  MessageBus = MessageBus()
     
-    async def handle_command(self, command: AntheaEngineCommand) -> CommandResult:
+    async def handle_command(self, command: FactExtractorEngineCommand) -> CommandResult:
         try:
             result = await self.execute(command.prompt)
             return CommandResult(success=True, result=result)
@@ -50,11 +50,11 @@ class AntheaEngine:
         else:
             context = [{"role": "user", "content": prompt}]
         await self.bus.publish(
-            AntheaEngineStatusEvent(status="Calling LLM", session_id=self.session_id)
+            FactExtractorEngineStatusEvent(status="Calling LLM", session_id=self.session_id)
         )
         response = await self.model.generate(context)
         await self.bus.publish(
-            AntheaEngineStatusEvent(status="finished", session_id=self.session_id)
+            FactExtractorEngineStatusEvent(status="finished", session_id=self.session_id)
         )
         return response.content       
 
@@ -62,7 +62,7 @@ async def useAntheaEngine(
     prompt: str, model, system_prompt: Optional[str] = None  
 ):
     session_id = str(uuid.uuid4())
-    engine = AntheaEngine(model, system_prompt, session_id)
+    engine = FactExtractorEngine(model, system_prompt, session_id)
     return await engine.execute(prompt)
     
 async def main(case: int):
@@ -76,14 +76,14 @@ async def main(case: int):
     bootstrap = ApplicationBootstrap(config)
     await bootstrap.bootstrap()
     if case == 1:
-        engine = AntheaEngine(
+        engine = FactExtractorEngine(
             Gpt41Mini(Providers.OPENAI), session_id="test"
         )
         cli = EngineCLI("test")
         cli.register_engine(engine)
-        cli.register_engine_command(AntheaEngineCommand, engine.handle_command)
+        cli.register_engine_command(FactExtractorEngineCommand, engine.handle_command)
         cli.register_engine_result_component(EngineResultComponent)
-        cli.register_loading_event(AntheaEngineStatusEvent)
+        cli.register_loading_event(FactExtractorEngineStatusEvent)
         await cli.main()
     elif case == 2:
         result = await useAntheaEngine(
