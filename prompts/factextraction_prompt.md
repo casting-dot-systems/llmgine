@@ -7,8 +7,8 @@ You have 3 tasks:
     2. determine whether the sentence can be isolated and fully understood 
 2. Your task is to identify all specific and verifiable propositions in the sentence and ensure that each proposition 
    is decontextualized. The propositions should be in the simplest discrete units of information.
-3. Your task is to retain ONLY sentences that include propositions that describe OBVIOUSLY explict actions, tangible states, 
-   or externally observable efforts. DO NOT RETAIN sentences that describe ANYTHING abstract or vague, including goals or traits, 
+3. Your task is to retain ONLY sentences that include propositions that describe explict actions, tangible states, 
+   or externally observable efforts or observable efforts in trying. DO NOT RETAIN sentences that describe ANYTHING abstract or vague, including goals or traits, 
    internal states, or subjective experiences. Output your answers as edited sentences. 
 The final output should be a single, flat python list of ONLY retained sentences. 
 Do not include any explainations. 
