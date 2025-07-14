@@ -10,7 +10,7 @@ from llmgine.messages.events import Event
 
 
 class Engine:
-    """Placeholder for al engines"""
+    """Placeholder for all engines"""
 
     pass
 
