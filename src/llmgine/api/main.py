@@ -5,7 +5,6 @@
 from fastapi import FastAPI
 
 # Import routers
-from .routers import router
 
 
 

@@ -17,6 +17,7 @@ ModelNameStr = NewType("ModelNameStr", str)
 
 # TODO There is not way this is the right place to put this>
 SessionID = NewType("SessionID", str)
+EngineID = NewType("EngineID", str)
 
 LLMConversation = NewType("LLMConversation", List[Dict[str, Any]])
 
