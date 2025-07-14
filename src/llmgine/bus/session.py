@@ -1,4 +1,3 @@
-from dataclasses import dataclass
 from typing import Callable, Optional, Type, Any
 import asyncio
 import time
@@ -6,27 +5,9 @@ import uuid
 import contextvars
 
 # Import Event directly to avoid circular import
-from llmgine.messages.events import Event
+from llmgine.messages.events import Event, SessionStartEvent, SessionEndEvent
 from llmgine.messages.commands import Command, CommandResult
 from llmgine.llm import SessionID
-
-@dataclass
-class SessionEvent(Event):
-    """An event that is part of a session."""
-
-    session_id: Optional[SessionID] = None
-
-
-@dataclass
-class SessionStartEvent(SessionEvent):
-    """An event that indicates the start of a session."""
-
-
-@dataclass
-class SessionEndEvent(SessionEvent):
-    """An event that indicates the end of a session."""
-
-    error: Optional[Exception] = None
 
 
 class BusSession:
@@ -44,13 +25,18 @@ class BusSession:
 
     def __init__(self, id: Optional[str] = None):
         """Initialize a new bus session with a unique ID."""
-        # Import MessageBus locally to avoid circular dependency at import time
-        from llmgine.bus.bus import MessageBus
-
         self.session_id = id or str(uuid.uuid4())
         self.start_time = time.time()
-        self.bus = MessageBus()
+        self._bus = None  # Will be set lazily
         self._active = True
+
+    @property
+    def bus(self):
+        """Get the message bus instance (lazy loading to avoid circular imports)."""
+        if self._bus is None:
+            from llmgine.bus.bus import MessageBus
+            self._bus = MessageBus()
+        return self._bus
 
     async def __aenter__(self):
         """Start the session and publish a session start event."""

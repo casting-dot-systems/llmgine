@@ -81,3 +81,22 @@ class CommandResultEvent(Event):
     """Event emitted when a command result is created."""
 
     command_result: Optional[CommandResult] = None
+
+
+@dataclass
+class SessionEvent(Event):
+    """An event that is part of a session."""
+
+    session_id: Optional[SessionID] = None
+
+
+@dataclass
+class SessionStartEvent(SessionEvent):
+    """An event that indicates the start of a session."""
+
+
+@dataclass
+class SessionEndEvent(SessionEvent):
+    """An event that indicates the end of a session."""
+
+    error: Optional[Exception] = None

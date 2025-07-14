@@ -35,6 +35,8 @@ from llmgine.messages.events import (
     CommandStartedEvent,
     Event,
     EventHandlerFailedEvent,
+    SessionStartEvent,
+    SessionEndEvent,
 )
 from llmgine.messages.scheduled_events import ScheduledEvent
 from llmgine.observability.handlers.base import ObservabilityEventHandler
@@ -100,6 +102,9 @@ class MessageBus:
         self._observability_handlers: List[ObservabilityEventHandler] = []
         self._suppress_event_errors: bool = True
         self.event_handler_errors: List[Exception] = []
+        self._shutdown_event: asyncio.Event = asyncio.Event()
+        self._new_event_signal: asyncio.Event = asyncio.Event()
+        self._handler_timeout: float = 30.0  # Default 30 second timeout
         logger.info("MessageBus initialized")
         self._initialized = True
         self.data_dir = os.path.dirname(os.path.abspath(__file__))
@@ -109,6 +114,9 @@ class MessageBus:
         Stops the bus if running. Reset the message bus to its initial state.
         """
         await self.stop()
+        # Create new event objects to avoid event loop binding issues
+        self._shutdown_event = asyncio.Event()
+        self._new_event_signal = asyncio.Event()
         self.__init__()
         logger.info("MessageBus reset")
 
@@ -123,6 +131,16 @@ class MessageBus:
         Unsupress errors during event handling.
         """
         self._suppress_event_errors = False
+
+    def set_handler_timeout(self, timeout: float) -> None:
+        """
+        Set the timeout for event and command handlers.
+        
+        Args:
+            timeout: Timeout in seconds for handlers to complete
+        """
+        self._handler_timeout = timeout
+        logger.info(f"Handler timeout set to {timeout} seconds")
 
         """
         Register an observability handler for this message bus.
@@ -161,7 +179,7 @@ class MessageBus:
         """
         if self._processing_task:
             logger.info("Stopping message bus...")
-            self._processing_task.cancel()
+            self._shutdown_event.set()
             
             await self._dump_queue()
             self._event_queue = None
@@ -205,8 +223,11 @@ class MessageBus:
         if session_id not in self._command_handlers:
             self._command_handlers[SessionID(session_id)] = {}
 
+        # Check if handler is already wrapped
         if not is_async_function(handler):
-            handler = self._wrap_command_handler_as_async(cast(CommandHandler, handler))
+            # Only wrap if not already wrapped
+            if not hasattr(handler, '_is_wrapped'):
+                handler = self._wrap_command_handler_as_async(cast(CommandHandler, handler))
 
         if command_type in self._command_handlers[SessionID(session_id)]:
             raise ValueError(
@@ -240,8 +261,11 @@ class MessageBus:
         if event_type not in self._event_handlers[SessionID(session_id)]:
             self._event_handlers[SessionID(session_id)][event_type] = []
 
+        # Check if handler is already wrapped
         if not is_async_function(handler):
-            handler = self._wrap_event_handler_as_async(cast(EventHandler, handler))
+            # Only wrap if not already wrapped
+            if not hasattr(handler, '_is_wrapped'):
+                handler = self._wrap_event_handler_as_async(cast(EventHandler, handler))
 
         self._event_handlers[SessionID(session_id)][event_type].append(
             cast(AsyncEventHandler, handler)
@@ -348,10 +372,18 @@ class MessageBus:
             await self.publish(
                 CommandStartedEvent(command=command, session_id=command.session_id)
             )
+            
+            # Execute command with timeout
             if isinstance(command, ApprovalCommand):
-                result: CommandResult = await execute_approval_command(command, handler)
+                result: CommandResult = await asyncio.wait_for(
+                    execute_approval_command(command, handler), 
+                    timeout=self._handler_timeout
+                )
             else:
-                result: CommandResult = await handler(command)
+                result: CommandResult = await asyncio.wait_for(
+                    handler(command), 
+                    timeout=self._handler_timeout
+                )
             
             logger.info(f"Command {command_type.__name__} executed successfully")
             await self.publish(
@@ -359,6 +391,16 @@ class MessageBus:
             )
             return result
 
+        except asyncio.TimeoutError:
+            logger.error(f"Command {command_type.__name__} timed out after {self._handler_timeout} seconds")
+            failed_result = CommandResult(
+                success=False,
+                command_id=command.command_id,
+                error=f"Handler timeout after {self._handler_timeout} seconds",
+                metadata={"timeout": self._handler_timeout},
+            )
+            await self.publish(CommandResultEvent(command_result=failed_result))
+            return failed_result
         except Exception as e:
             logger.exception(f"Error executing command {command_type.__name__}: {e}")
             failed_result = CommandResult(
@@ -385,6 +427,7 @@ class MessageBus:
             if self._event_queue is None:
                 raise ValueError("Event queue is not initialized")
             await self._event_queue.put(event)
+            self._new_event_signal.set()
             logger.debug(f"Queued event: {type(event).__name__}")
         except Exception as e:
             logger.error(f"Error queing event: {e}", exc_info=True)
@@ -396,65 +439,98 @@ class MessageBus:
         """
         Process events from the queue indefinitely.
         Handles each event by dispatching to registered handlers.
+        Uses efficient event-driven waiting and batch processing.
         """
         logger.info("Event processing loop starting")
-
-        while True:
+        BATCH_SIZE = 10  # Process up to 10 events per batch
+        
+        while not self._shutdown_event.is_set():
             try:
-                total_events = self._event_queue.qsize() # type: ignore
-                while not self._event_queue.empty() and total_events > 0: # type: ignore
+                # Wait for events or shutdown signal
+                if self._event_queue is None or self._event_queue.empty():
+                    await asyncio.wait(
+                        [
+                            asyncio.create_task(self._new_event_signal.wait()),
+                            asyncio.create_task(self._shutdown_event.wait())
+                        ],
+                        return_when=asyncio.FIRST_COMPLETED
+                    )
+                    
+                    # Clear the signal for next iteration
+                    self._new_event_signal.clear()
+                    
+                    # Check if we should shutdown
+                    if self._shutdown_event.is_set():
+                        break
+                
+                # Process events in batches for better performance
+                batch_count = 0
+                events_to_requeue = []
+                
+                while (not self._event_queue.empty() and 
+                       batch_count < BATCH_SIZE and 
+                       not self._shutdown_event.is_set()):
+                    
                     try:
-                        total_events -= 1
-                        event = await self._event_queue.get()  # type: ignore
+                        event = await self._event_queue.get()
+                        batch_count += 1
                         logger.debug(f"Dequeued event {type(event).__name__}")
 
-                        # if a scheduled event is not yet due, we queue it again
+                        # Check if scheduled event is due
                         if isinstance(event, ScheduledEvent) and event.scheduled_time > datetime.now():
-                            await self._event_queue.put(event) # type: ignore
-                            logger.debug(f"Event {type(event).__name__} is scheduled for {event.scheduled_time}, queuing again")
+                            events_to_requeue.append(event)
+                            logger.debug(f"Event {type(event).__name__} is scheduled for {event.scheduled_time}, will requeue")
                             continue
 
+                        # Handle the event
                         try:
                             await self._handle_event(event)
-                        except asyncio.CancelledError:
-                            logger.warning("Event handling cancelled")
-                            raise
                         except Exception:
                             logger.exception(f"Error processing event {type(event).__name__}")
                         finally:
-                            self._event_queue.task_done()  # type: ignore
+                            self._event_queue.task_done()
+                            
                     except asyncio.CancelledError:
-                        logger.info("Event processing loop cancelled")
+                        logger.info("Event processing batch cancelled")
                         raise
                 
-                # Leave time for other processes to run
-                await asyncio.sleep(1)
+                # Requeue scheduled events that aren't due yet
+                for event in events_to_requeue:
+                    await self._event_queue.put(event)
+                    self._event_queue.task_done()
 
             except asyncio.CancelledError:
                 logger.info("Event processing loop cancelled")
                 raise
             except Exception as e:
                 logger.exception(f"Error in event processing loop: {e}")
+                # Brief pause before retrying on error
                 await asyncio.sleep(0.1)
+                
+        logger.info("Event processing loop shutting down")
 
 
     async def ensure_events_processed(self) -> None:
         """
         Ensure all non-scheduled events in the queue are processed.
+        Signals the event processor to wake up and process events.
         """
         if self._event_queue is None:
             return
 
-        temp_queue: List[Event] = []
-        while not self._event_queue.empty():
-            event = await self._event_queue.get()
-            if isinstance(event, ScheduledEvent) and event.scheduled_time > datetime.now():
-                temp_queue.append(event)  # Save scheduled events for re-queuing
-            else:
-                await self._handle_event(event)
-        # Re-queue scheduled events
-        for event in temp_queue:
-            await self._event_queue.put(event)
+        # Signal the event processor to wake up
+        self._new_event_signal.set()
+        
+        # Give a brief moment for events to be processed
+        await asyncio.sleep(0.01)
+        
+        # Wait for current events to be processed (with timeout)
+        max_wait = 1.0  # Maximum 1 second wait
+        start_time = asyncio.get_event_loop().time()
+        
+        while (not self._event_queue.empty() and 
+               (asyncio.get_event_loop().time() - start_time) < max_wait):
+            await asyncio.sleep(0.01)
 
     async def _handle_event(self, event: Event) -> None:
         """
@@ -517,15 +593,26 @@ class MessageBus:
         logger.debug(
             f"Dispatching event {event_type} in session {event.session_id} to {len(handlers)} handlers"  # type: ignore
         )
-        tasks = [asyncio.create_task(handler(event)) for handler in handlers]  # type: ignore
-        results = await asyncio.gather(*tasks, return_exceptions=True)  # type: ignore
+        # Create timeout-wrapped tasks for handlers
+        timeout_tasks = [
+            asyncio.create_task(asyncio.wait_for(handler(event), timeout=self._handler_timeout))
+            for handler in handlers
+        ]
+        results = await asyncio.gather(*timeout_tasks, return_exceptions=True)  # type: ignore
         for i, result in enumerate(results):  # type: ignore
             if isinstance(result, Exception):
                 self.event_handler_errors.append(result)
                 handler_name = getattr(handlers[i], "__qualname__", repr(handlers[i]))  # type: ignore
-                logger.exception(
-                    f"Error in handler '{handler_name}' for {event_type}: {result}"
-                )
+                
+                if isinstance(result, asyncio.TimeoutError):
+                    logger.error(
+                        f"Handler '{handler_name}' for {event_type} timed out after {self._handler_timeout} seconds"
+                    )
+                else:
+                    logger.exception(
+                        f"Error in handler '{handler_name}' for {event_type}: {result}"
+                    )
+                    
                 if not self._suppress_event_errors:
                     raise result
                 else:
@@ -540,6 +627,7 @@ class MessageBus:
             return handler(event)
 
         async_wrapper.function = handler  # type: ignore[attr-defined]
+        async_wrapper._is_wrapped = True  # type: ignore[attr-defined]
 
         return async_wrapper
 
@@ -550,6 +638,7 @@ class MessageBus:
             return handler(command)
 
         async_wrapper.function = handler  # type: ignore[attr-defined]
+        async_wrapper._is_wrapped = True  # type: ignore[attr-defined]
 
         return async_wrapper
 
