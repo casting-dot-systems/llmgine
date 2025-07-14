@@ -114,10 +114,17 @@ class MessageBus:
         Stops the bus if running. Reset the message bus to its initial state.
         """
         await self.stop()
+        # Clear all handlers
+        self._command_handlers.clear()
+        self._event_handlers.clear()
+        self.event_handler_errors.clear()
+        self._observability_handlers.clear()
         # Create new event objects to avoid event loop binding issues
         self._shutdown_event = asyncio.Event()
         self._new_event_signal = asyncio.Event()
-        self.__init__()
+        # Reset to defaults
+        self._handler_timeout = 30.0
+        self._suppress_event_errors = True
         logger.info("MessageBus reset")
 
     def suppress_event_errors(self) -> None:
@@ -278,25 +285,27 @@ class MessageBus:
         Args:
             session_id: The session identifier.
         """
-        if session_id not in self._command_handlers:
-            logger.debug(f"No command handlers to unregister for session {session_id}")
-            return
-
+        command_handlers_removed = 0
+        event_handlers_removed = 0
+        
         if session_id in self._command_handlers:
-            num_cmd_handlers = len(self._command_handlers[session_id])
+            command_handlers_removed = len(self._command_handlers[session_id])
             del self._command_handlers[session_id]
             logger.debug(
-                f"Unregistered {num_cmd_handlers} command handlers for session {session_id}"
+                f"Unregistered {command_handlers_removed} command handlers for session {session_id}"
             )
 
         if session_id in self._event_handlers:
-            num_event_handlers = sum(
+            event_handlers_removed = sum(
                 len(handlers) for handlers in self._event_handlers[session_id].values()
             )
             del self._event_handlers[session_id]
             logger.debug(
-                f"Unregistered {num_event_handlers} event handlers for session {session_id}"
+                f"Unregistered {event_handlers_removed} event handlers for session {session_id}"
             )
+            
+        if command_handlers_removed == 0 and event_handlers_removed == 0:
+            logger.debug(f"No handlers to unregister for session {session_id}")
 
     def unregister_command_handler(
         self, command_type: Type[CommandType], session_id: str = "ROOT"
@@ -466,6 +475,7 @@ class MessageBus:
                 # Process events in batches for better performance
                 batch_count = 0
                 events_to_requeue = []
+                next_scheduled_time = None
                 
                 while (not self._event_queue.empty() and 
                        batch_count < BATCH_SIZE and 
@@ -477,10 +487,15 @@ class MessageBus:
                         logger.debug(f"Dequeued event {type(event).__name__}")
 
                         # Check if scheduled event is due
-                        if isinstance(event, ScheduledEvent) and event.scheduled_time > datetime.now():
-                            events_to_requeue.append(event)
-                            logger.debug(f"Event {type(event).__name__} is scheduled for {event.scheduled_time}, will requeue")
-                            continue
+                        if isinstance(event, ScheduledEvent):
+                            now = datetime.now()
+                            if event.scheduled_time > now:
+                                events_to_requeue.append(event)
+                                # Track the earliest scheduled time for delay calculation
+                                if next_scheduled_time is None or event.scheduled_time < next_scheduled_time:
+                                    next_scheduled_time = event.scheduled_time
+                                logger.debug(f"Event {type(event).__name__} is scheduled for {event.scheduled_time}, will requeue")
+                                continue
 
                         # Handle the event
                         try:
@@ -498,6 +513,12 @@ class MessageBus:
                 for event in events_to_requeue:
                     await self._event_queue.put(event)
                     self._event_queue.task_done()
+                    
+                # If we have scheduled events, add a small delay to avoid busy waiting
+                if next_scheduled_time:
+                    delay = min(0.1, max(0.01, (next_scheduled_time - datetime.now()).total_seconds()))
+                    if delay > 0:
+                        await asyncio.sleep(delay)
 
             except asyncio.CancelledError:
                 logger.info("Event processing loop cancelled")
@@ -544,13 +565,15 @@ class MessageBus:
         # handle session specific handlers
         if event.session_id in self._event_handlers and event.session_id != "ROOT":
             if event_type in self._event_handlers[event.session_id]:
-                handlers.extend(self._event_handlers[event.session_id][event_type])  # type: ignore
+                session_handlers = self._event_handlers[event.session_id][event_type]
+                if session_handlers:  # Only if there are actually handlers
+                    handlers.extend(session_handlers)  # type: ignore
 
-            # Default to ROOT handlers if no session-specific handler is found
-        elif event.session_id != "ROOT":
-            # there is no session in event, so we use ROOT handlers if possible
+        # Default to ROOT handlers if no session-specific handler is found
+        if not handlers and event.session_id != "ROOT":
+            # there is no session handlers, so we use ROOT handlers if possible
             if SessionID("ROOT") in self._event_handlers:
-                # there is root handlers, so we use them
+                # there are root handlers, so we use them
                 if event_type in self._event_handlers[SessionID("ROOT")]:
                     handlers.extend(self._event_handlers[SessionID("ROOT")][event_type])  # type: ignore
                     logger.warning(

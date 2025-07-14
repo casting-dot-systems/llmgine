@@ -77,7 +77,7 @@ class BusSession:
             raise RuntimeError("Cannot register handlers on an inactive session")
 
         # Pass session_id explicitly to the bus registration method
-        self.bus.register_event_handler(self.session_id, event_type, handler)
+        self.bus.register_event_handler(event_type, handler, self.session_id)
         return self  # For method chaining
 
     def register_command_handler(
@@ -93,7 +93,7 @@ class BusSession:
             raise RuntimeError("Cannot register handlers on an inactive session")
 
         # Pass session_id explicitly to the bus registration method
-        self.bus.register_command_handler(self.session_id, command_type, handler)
+        self.bus.register_command_handler(command_type, handler, self.session_id)
         return self  # For method chaining
 
     async def execute_with_session(self, command: Command) -> Any:

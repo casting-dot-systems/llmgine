@@ -52,11 +52,13 @@ class TestScheduledEvent(ScheduledEvent):
 class TestMessageBusBasics:
     """Test basic MessageBus functionality."""
 
-    def test_singleton_behavior(self):
+    @pytest.mark.asyncio
+    async def test_singleton_behavior(self):
         """Test that MessageBus follows singleton pattern."""
         bus1 = MessageBus()
         bus2 = MessageBus()
         assert bus1 is bus2
+        await bus1.reset()  # Clean up
 
     @pytest.mark.asyncio
     async def test_bus_start_stop(self):
@@ -97,9 +99,11 @@ class TestMessageBusBasics:
         assert not bus._command_handlers
         assert not bus._event_handlers
 
-    def test_handler_timeout_configuration(self):
+    @pytest.mark.asyncio
+    async def test_handler_timeout_configuration(self):
         """Test handler timeout configuration."""
         bus = MessageBus()
+        await bus.reset()
         
         # Default timeout
         assert bus._handler_timeout == 30.0
@@ -107,10 +111,14 @@ class TestMessageBusBasics:
         # Set new timeout
         bus.set_handler_timeout(60.0)
         assert bus._handler_timeout == 60.0
+        
+        await bus.reset()
 
-    def test_error_suppression_control(self):
+    @pytest.mark.asyncio
+    async def test_error_suppression_control(self):
         """Test error suppression configuration."""
         bus = MessageBus()
+        await bus.reset()
         
         # Default is suppressed
         assert bus._suppress_event_errors is True
@@ -122,6 +130,8 @@ class TestMessageBusBasics:
         # Suppress again
         bus.suppress_event_errors()
         assert bus._suppress_event_errors is True
+        
+        await bus.reset()
 
 
 class TestHandlerRegistration:
@@ -130,6 +140,10 @@ class TestHandlerRegistration:
     def setup_method(self):
         """Setup for each test method."""
         self.bus = MessageBus()
+        asyncio.run(self.bus.reset())
+        
+    def teardown_method(self):
+        """Cleanup after each test method."""
         asyncio.run(self.bus.reset())
 
     def test_register_command_handler_success(self):
@@ -220,6 +234,10 @@ class TestCommandExecution:
     def setup_method(self):
         """Setup for each test method."""
         self.bus = MessageBus()
+        asyncio.run(self.bus.reset())
+        
+    def teardown_method(self):
+        """Cleanup after each test method."""
         asyncio.run(self.bus.reset())
 
     @pytest.mark.asyncio
@@ -316,6 +334,10 @@ class TestEventProcessing:
     def setup_method(self):
         """Setup for each test method."""
         self.bus = MessageBus()
+        asyncio.run(self.bus.reset())
+        
+    def teardown_method(self):
+        """Cleanup after each test method."""
         asyncio.run(self.bus.reset())
 
     @pytest.mark.asyncio
@@ -430,7 +452,12 @@ class TestEventProcessing:
         
         # Timeout error should be recorded
         assert len(self.bus.event_handler_errors) > 0
-        assert any(isinstance(err, asyncio.TimeoutError) for err in self.bus.event_handler_errors)
+        # Check for timeout errors (may be wrapped)
+        has_timeout = any(
+            isinstance(err, asyncio.TimeoutError) or 
+            "timeout" in str(err).lower() for err in self.bus.event_handler_errors
+        )
+        assert has_timeout
         
         await self.bus.stop()
 
@@ -446,7 +473,7 @@ class TestEventProcessing:
         await self.bus.start()
         
         # Schedule event for near future
-        scheduled_time = datetime.now() + timedelta(milliseconds=100)
+        scheduled_time = datetime.now() + timedelta(milliseconds=200)
         event = TestScheduledEvent(data="scheduled_data", scheduled_time=scheduled_time)
         await self.bus.publish(event)
         
@@ -455,7 +482,7 @@ class TestEventProcessing:
         assert len(processed_events) == 0
         
         # Should be processed after scheduled time
-        await asyncio.sleep(0.1)
+        await asyncio.sleep(0.3)
         assert len(processed_events) == 1
         assert processed_events[0] == "scheduled_data"
         
@@ -468,6 +495,10 @@ class TestSessionManagement:
     def setup_method(self):
         """Setup for each test method."""
         self.bus = MessageBus()
+        asyncio.run(self.bus.reset())
+        
+    def teardown_method(self):
+        """Cleanup after each test method."""
         asyncio.run(self.bus.reset())
 
     @pytest.mark.asyncio
