@@ -1,0 +1,267 @@
+"""Generated database class for {{ database.title }}."""
+
+{% for import_line in get_imports(database.properties) %}
+{{ import_line }}
+{% endfor %}
+
+from notion_framework.client.client import NotionClient
+from notion_framework.types.page import DatabasePage, PageData
+from notion_framework.types.filters import FilterBuilder, FilterCondition
+from notion_framework.types.sorts import SortBuilder, SortCondition
+
+
+class {{ database.title | normalize_class_name }}(BaseModel):
+    """Typed interface for {{ database.title }} database."""
+    
+    # Database metadata
+    database_id: str = "{{ database.id }}"
+    title: str = "{{ database.title }}"
+    
+    # Properties
+{% for prop_name, prop in database.properties.items() %}
+{% if prop.is_editable %}
+    {{ prop_name | normalize_name }}: {{ prop.type | python_type(get_property_options(prop)) }}{% if not prop.is_required %} = None{% endif %} = Field(
+        description="{{ prop.name }}",
+{% if prop.type in ['select', 'multi_select'] and get_property_options(prop) %}
+        enum=[{% for opt in get_property_options(prop) %}"{{ opt.name }}"{% if not loop.last %}, {% endif %}{% endfor %}],
+{% endif %}
+    )
+{% endif %}
+{% endfor %}
+
+    # Internal Notion property objects
+{% for prop_name, prop in database.properties.items() %}
+    _{{ prop_name | normalize_name }}_notion: Optional[{{ prop.type | notion_type }}] = None
+{% endfor %}
+
+    def __init__(self, **data):
+        super().__init__(**data)
+        self._client: Optional[NotionClient] = None
+    
+    def set_client(self, client: NotionClient) -> None:
+        """Set the Notion client for database operations."""
+        self._client = client
+    
+    # Property getters and setters
+{% for prop_name, prop in database.properties.items() %}
+{% if prop.is_editable %}
+    
+    def set_{{ prop_name | normalize_name }}(self, value: {{ prop.type | python_type(get_property_options(prop)) }}) -> None:
+        """Set {{ prop.name }} property."""
+{% if prop.type in ['title', 'rich_text'] %}
+        self._{{ prop_name | normalize_name }}_notion = {{ prop.type | notion_type }}(value)
+        self.{{ prop_name | normalize_name }} = value
+{% elif prop.type == 'number' %}
+        self._{{ prop_name | normalize_name }}_notion = {{ prop.type | notion_type }}(value)
+        self.{{ prop_name | normalize_name }} = value
+{% elif prop.type in ['select', 'status'] %}
+        self._{{ prop_name | normalize_name }}_notion = {{ prop.type | notion_type }}(value)
+        self.{{ prop_name | normalize_name }} = value
+{% elif prop.type == 'multi_select' %}
+        self._{{ prop_name | normalize_name }}_notion = {{ prop.type | notion_type }}(value)
+        self.{{ prop_name | normalize_name }} = value
+{% elif prop.type == 'checkbox' %}
+        self._{{ prop_name | normalize_name }}_notion = {{ prop.type | notion_type }}(value)
+        self.{{ prop_name | normalize_name }} = value
+{% elif prop.type == 'date' %}
+        self._{{ prop_name | normalize_name }}_notion = {{ prop.type | notion_type }}(value)
+        self.{{ prop_name | normalize_name }} = value
+{% elif prop.type == 'people' %}
+        self._{{ prop_name | normalize_name }}_notion = {{ prop.type | notion_type }}(value)
+        self.{{ prop_name | normalize_name }} = value
+{% elif prop.type == 'relation' %}
+        self._{{ prop_name | normalize_name }}_notion = {{ prop.type | notion_type }}(value)
+        self.{{ prop_name | normalize_name }} = value
+{% else %}
+        self._{{ prop_name | normalize_name }}_notion = {{ prop.type | notion_type }}(value)
+        self.{{ prop_name | normalize_name }} = value
+{% endif %}
+    
+    def get_{{ prop_name | normalize_name }}(self) -> {{ prop.type | python_type(get_property_options(prop)) }}:
+        """Get {{ prop.name }} property value."""
+        return self.{{ prop_name | normalize_name }}
+{% endif %}
+{% endfor %}
+
+    def to_notion_properties(self) -> Dict[str, Any]:
+        """Convert to Notion API properties format."""
+        properties = {}
+        
+{% for prop_name, prop in database.properties.items() %}
+{% if prop.is_editable %}
+        if self._{{ prop_name | normalize_name }}_notion is not None:
+            properties["{{ prop.name }}"] = self._{{ prop_name | normalize_name }}_notion.to_notion_format()
+{% endif %}
+{% endfor %}
+        
+        return properties
+    
+    @classmethod
+    def from_page_data(cls, page_data: PageData) -> "{{ database.title | normalize_class_name }}":
+        """Create instance from Notion page data."""
+        instance = cls()
+        
+        # Extract property values
+{% for prop_name, prop in database.properties.items() %}
+        {{ prop_name | normalize_name }}_data = page_data.get_property_value("{{ prop.name }}")
+        if {{ prop_name | normalize_name }}_data:
+            instance._{{ prop_name | normalize_name }}_notion = {{ prop.type | notion_type }}.from_notion_format({{ prop_name | normalize_name }}_data)
+{% if prop.type in ['title', 'rich_text'] %}
+            instance.{{ prop_name | normalize_name }} = instance._{{ prop_name | normalize_name }}_notion.plain_text
+{% elif prop.type == 'number' %}
+            instance.{{ prop_name | normalize_name }} = instance._{{ prop_name | normalize_name }}_notion.number
+{% elif prop.type in ['select', 'status'] %}
+            instance.{{ prop_name | normalize_name }} = instance._{{ prop_name | normalize_name }}_notion.value
+{% elif prop.type == 'multi_select' %}
+            instance.{{ prop_name | normalize_name }} = instance._{{ prop_name | normalize_name }}_notion.values
+{% elif prop.type == 'checkbox' %}
+            instance.{{ prop_name | normalize_name }} = instance._{{ prop_name | normalize_name }}_notion.checkbox
+{% elif prop.type == 'date' %}
+            instance.{{ prop_name | normalize_name }} = instance._{{ prop_name | normalize_name }}_notion.start_date
+{% elif prop.type == 'people' %}
+            instance.{{ prop_name | normalize_name }} = instance._{{ prop_name | normalize_name }}_notion.user_ids
+{% elif prop.type == 'relation' %}
+            instance.{{ prop_name | normalize_name }} = instance._{{ prop_name | normalize_name }}_notion.page_ids
+{% else %}
+            instance.{{ prop_name | normalize_name }} = instance._{{ prop_name | normalize_name }}_notion
+{% endif %}
+        
+{% endfor %}
+        return instance
+    
+    # CRUD Operations
+    
+    async def create(self) -> str:
+        """Create a new page in the database."""
+        if not self._client:
+            raise ValueError("Client not set. Call set_client() first.")
+        
+        page_data = {
+            "parent": {"database_id": self.database_id},
+            "properties": self.to_notion_properties()
+        }
+        
+        response = await self._client.create_page(**page_data)
+        return response["id"]
+    
+    async def update(self, page_id: str) -> str:
+        """Update an existing page."""
+        if not self._client:
+            raise ValueError("Client not set. Call set_client() first.")
+        
+        response = await self._client.update_page(
+            page_id=page_id,
+            properties=self.to_notion_properties()
+        )
+        return response["id"]
+    
+    @classmethod
+    async def get(cls, client: NotionClient, page_id: str) -> "{{ database.title | normalize_class_name }}":
+        """Get a page by ID."""
+        response = await client.get_page(page_id)
+        page_data = PageData.from_notion_response(response)
+        
+        instance = cls.from_page_data(page_data)
+        instance.set_client(client)
+        return instance
+    
+    @classmethod
+    async def list(
+        cls,
+        client: NotionClient,
+        filter_condition: Optional[FilterCondition] = None,
+        sorts: Optional[List[SortCondition]] = None,
+        limit: Optional[int] = None
+    ) -> List["{{ database.title | normalize_class_name }}"]:
+        """List pages from the database."""
+        query_params = {
+            "database_id": cls.database_id
+        }
+        
+        if filter_condition:
+            query_params["filter_obj"] = filter_condition.to_notion_format()
+        
+        if sorts:
+            query_params["sorts"] = [sort.to_notion_format() for sort in sorts]
+        
+        if limit:
+            query_params["page_size"] = limit
+        
+        response = await client.query_database(**query_params)
+        
+        instances = []
+        for result in response.get("results", []):
+            page_data = PageData.from_notion_response(result)
+            instance = cls.from_page_data(page_data)
+            instance.set_client(client)
+            instances.append(instance)
+        
+        return instances
+
+    # Filter helpers
+    
+    @classmethod
+    def filter(cls) -> FilterBuilder:
+        """Get a filter builder for this database."""
+        return FilterBuilder()
+    
+    @classmethod
+    def sort(cls) -> SortBuilder:
+        """Get a sort builder for this database."""
+        return SortBuilder()
+
+{% for prop_name, prop in database.properties.items() %}
+{% if prop.type == 'select' and get_property_options(prop) %}
+    
+    # {{ prop.name }} filter helpers
+    @classmethod
+    def filter_by_{{ prop_name | normalize_name }}(cls, value: str) -> FilterCondition:
+        """Filter by {{ prop.name }}."""
+        return cls.filter().property("{{ prop.name }}").select().equals(value)
+{% elif prop.type == 'multi_select' and get_property_options(prop) %}
+    
+    # {{ prop.name }} filter helpers
+    @classmethod
+    def filter_by_{{ prop_name | normalize_name }}_contains(cls, value: str) -> FilterCondition:
+        """Filter by {{ prop.name }} containing value."""
+        return cls.filter().property("{{ prop.name }}").multi_select().contains(value)
+{% elif prop.type == 'checkbox' %}
+    
+    # {{ prop.name }} filter helpers
+    @classmethod
+    def filter_by_{{ prop_name | normalize_name }}(cls, value: bool) -> FilterCondition:
+        """Filter by {{ prop.name }}."""
+        return cls.filter().property("{{ prop.name }}").checkbox().equals(value)
+{% elif prop.type in ['title', 'rich_text'] %}
+    
+    # {{ prop.name }} filter helpers
+    @classmethod
+    def filter_by_{{ prop_name | normalize_name }}_contains(cls, value: str) -> FilterCondition:
+        """Filter by {{ prop.name }} containing value."""
+        return cls.filter().property("{{ prop.name }}").{{ prop.type }}().contains(value)
+{% elif prop.type == 'number' %}
+    
+    # {{ prop.name }} filter helpers
+    @classmethod
+    def filter_by_{{ prop_name | normalize_name }}_equals(cls, value: Union[int, float]) -> FilterCondition:
+        """Filter by {{ prop.name }} equals value."""
+        return cls.filter().property("{{ prop.name }}").number().equals(value)
+    
+    @classmethod
+    def filter_by_{{ prop_name | normalize_name }}_greater_than(cls, value: Union[int, float]) -> FilterCondition:
+        """Filter by {{ prop.name }} greater than value."""
+        return cls.filter().property("{{ prop.name }}").number().greater_than(value)
+{% elif prop.type == 'date' %}
+    
+    # {{ prop.name }} filter helpers
+    @classmethod
+    def filter_by_{{ prop_name | normalize_name }}_past_week(cls) -> FilterCondition:
+        """Filter by {{ prop.name }} in past week."""
+        return cls.filter().property("{{ prop.name }}").date().past_week()
+    
+    @classmethod
+    def filter_by_{{ prop_name | normalize_name }}_after(cls, date: Union[str, datetime]) -> FilterCondition:
+        """Filter by {{ prop.name }} after date."""
+        return cls.filter().property("{{ prop.name }}").date().after(date)
+{% endif %}
+{% endfor %}
