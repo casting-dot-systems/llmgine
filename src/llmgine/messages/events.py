@@ -6,27 +6,28 @@ Events represent things that have happened in the system.
 
 import inspect
 import uuid
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from datetime import datetime
 from types import FrameType
-from typing import Any, Dict, Optional, override
+from typing import Any, Dict, Optional
+from pydantic import BaseModel, Field
 
 from llmgine.llm import SessionID
 from llmgine.messages.commands import Command, CommandResult
 
 
 @dataclass
-class Event:
+class Event(BaseModel):
     """Base class for all events in the system.
 
     Events represent things that have happened in the system.
     Multiple handlers can process each event.
     """
 
-    event_id: str = field(default_factory=lambda: str(uuid.uuid4()))
-    timestamp: str = field(default_factory=lambda: datetime.now().isoformat())
-    metadata: Dict[str, Any] = field(default_factory=dict)
-    session_id: SessionID = field(default_factory=lambda: SessionID("ROOT"))
+    event_id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    timestamp: str = Field(default_factory=lambda: datetime.now().isoformat())
+    metadata: Dict[str, Any] = Field(default_factory=dict)
+    session_id: SessionID = Field(default_factory=lambda: SessionID("ROOT"))
 
     def __post_init__(self) -> None:
         # Add metadata about where this event was created

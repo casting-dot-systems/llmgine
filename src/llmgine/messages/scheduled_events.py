@@ -1,6 +1,7 @@
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from datetime import datetime
 from typing import Any, Dict, Type, override
+from pydantic import Field
 
 from llmgine.messages.events import Event
 
@@ -14,7 +15,7 @@ class ScheduledEvent(Event):
     Scheduled time must be provided. 
     If not, the event will be treated as a regular event.
     """
-    scheduled_time: datetime = field(default_factory=lambda: datetime.now())
+    scheduled_time: datetime = Field(default_factory=lambda: datetime.now())
 
     @override
     def to_dict(self) -> Dict[str, Any]:
