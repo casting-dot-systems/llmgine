@@ -65,12 +65,12 @@ class SessionService:
         self.monitor_thread = threading.Thread(target=self.monitor_sessions)
         self.monitor_thread.start()
 
-    def create_session(self):
+    def create_session(self) -> Optional[SessionID]:
         """
         Create a session
         """
         if len(self.sessions) >= self.max_sessions:
-            raise ValueError(f"Max sessions reached: {self.max_sessions}")
+            return None
         session = Session()
         self.sessions[session.get_session_id()] = session
         return session.get_session_id()
@@ -103,7 +103,7 @@ class SessionService:
         if session_id in self.sessions:
             self.sessions.pop(session_id)
 
-    def update_session_status(self, session_id: SessionID, status: SessionStatus):
+    def update_session_status(self, session_id: str, status: SessionStatus):
         """
         Update the status of a session
         """

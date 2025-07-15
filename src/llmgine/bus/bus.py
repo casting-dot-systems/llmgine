@@ -577,6 +577,32 @@ class MessageBus:
         for event in events:
             await self._event_queue.put(event) # type: ignore
 
+    async def get_events(self, session_id: SessionID) -> List[Event]:
+        """
+        Get all events for a session without removing them from the queue.
+        """
+
+        async with asyncio.Lock():
+            
+            if self._event_queue is None:
+                return []
+            
+            events: List[Event] = []
+            temp_events: List[Event] = []
+            
+            # Get all events from the queue temporarily
+            while not self._event_queue.empty():
+                event = await self._event_queue.get()
+                temp_events.append(event)
+                if event.session_id == session_id:
+                    events.append(event)
+            
+            # Put all events back into the queue
+            for event in temp_events:
+                await self._event_queue.put(event)
+            
+        return events
+
 def bus_exception_hook(bus: MessageBus) -> None:
     """
     Allows the bus to cleanup when an exception is raised globally.
