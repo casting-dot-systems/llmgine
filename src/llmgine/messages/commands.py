@@ -6,7 +6,6 @@ Commands represent actions to be performed by the system.
 
 import inspect
 import uuid
-from dataclasses import dataclass
 from datetime import datetime
 from types import FrameType
 from typing import Any, Dict, Optional
@@ -14,8 +13,6 @@ from pydantic import BaseModel, Field
 
 from llmgine.llm import SessionID
 
-
-@dataclass
 class Command(BaseModel):
     """Base class for all commands in the system.
 
@@ -33,7 +30,6 @@ class Command(BaseModel):
 
 
 
-@dataclass
 class CommandResult(BaseModel):
     """Result of a command execution."""
 

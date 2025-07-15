@@ -1,12 +1,10 @@
-from dataclasses import dataclass
 from datetime import datetime
-from typing import Any, Dict, Type, override
+from typing import Any, Dict, Type
 from pydantic import Field
 
 from llmgine.messages.events import Event
 
 
-@dataclass
 class ScheduledEvent(Event):
     """Base class for all scheduled events.
     
@@ -17,7 +15,6 @@ class ScheduledEvent(Event):
     """
     scheduled_time: datetime = Field(default_factory=lambda: datetime.now())
 
-    @override
     def to_dict(self) -> Dict[str, Any]:
         """
         Convert the event to a dictionary.

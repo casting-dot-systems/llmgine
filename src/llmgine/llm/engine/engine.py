@@ -11,13 +11,14 @@ from llmgine.bus.bus import MessageBus
 from llmgine.llm import EngineID, SessionID
 from llmgine.messages.commands import Command, CommandResult
 from llmgine.messages.events import Event
+from pydantic import BaseModel
 
 class EngineStatus(Enum):
     IDLE = "idle"
     RUNNING = "running"
     FAILED = "failed"
 
-class Engine:
+class Engine(BaseModel):
     """Placeholder for all engines"""
 
     def __init__(self, engine_id: Optional[EngineID] = None):
@@ -28,22 +29,18 @@ class Engine:
         self.bus = MessageBus()
 
 
-@dataclass
 class DummyEngineCommand(Command):
     prompt: str = ""
 
 
-@dataclass
 class DummyEngineStatusUpdate(Event):
     status: str = ""
 
 
-@dataclass
 class DummyEngineConfirmationInput(Command):
     prompt: str = ""
 
 
-@dataclass
 class DummyEngineToolResult(Event):
     tool_name: str = ""
     result: str = ""

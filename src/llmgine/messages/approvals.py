@@ -6,7 +6,6 @@ before execution.
 """
 
 import asyncio
-from dataclasses import dataclass
 from datetime import datetime
 from enum import Enum
 from typing import Awaitable, Callable, Optional
@@ -22,7 +21,6 @@ class ApprovalStatus(Enum):
     DENIED = "denied"
     EXPIRED = "expired"
 
-@dataclass
 class ApprovalCommand(Command):
     """Command to request approval for an action.
     
@@ -46,29 +44,24 @@ class ApprovalCommand(Command):
         return datetime.now() > self.expires_at
 
 
-@dataclass
 class ApprovalResult(CommandResult):
     """Result of an approval command execution."""
     
     approval_status: ApprovalStatus = ApprovalStatus.PENDING
 
-@dataclass
 class ApprovalRequestEvent(Event):
     """Event emitted when an approval request is created."""
     
     approval_command: Optional[ApprovalCommand] = None
 
-@dataclass
 class ApprovalAcceptedEvent(Event):
     """Event emitted when an approval request receives a response."""
     pass
 
-@dataclass
 class ApprovalDeniedEvent(Event):
     """Event emitted when an approval request receives a response."""
     pass
 
-@dataclass
 class ApprovalExpiredEvent(Event):
     """Event emitted when an approval request expires."""
     pass

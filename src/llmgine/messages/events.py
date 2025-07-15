@@ -6,7 +6,6 @@ Events represent things that have happened in the system.
 
 import inspect
 import uuid
-from dataclasses import dataclass
 from datetime import datetime
 from types import FrameType
 from typing import Any, Dict, Optional
@@ -16,7 +15,6 @@ from llmgine.llm import SessionID
 from llmgine.messages.commands import Command, CommandResult
 
 
-@dataclass
 class Event(BaseModel):
     """Base class for all events in the system.
 
@@ -61,43 +59,35 @@ class Event(BaseModel):
         return cls(**event_dict)
 
 
-@dataclass
 class EventHandlerFailedEvent(Event):
     """Event emitted when an event handler fails."""
 
     event: Optional[Event] = None
     handler: Optional[str] = None
-    exception: Optional[Exception] = None
+    error: Optional[str] = None
 
 
-@dataclass
 class CommandStartedEvent(Event):
     """Event emitted when a command is started."""
 
     command: Optional[Command] = None
 
 
-@dataclass
 class CommandResultEvent(Event):
     """Event emitted when a command result is created."""
 
     command_result: Optional[CommandResult] = None
 
 
-@dataclass
 class SessionEvent(Event):
     """An event that is part of a session."""
 
-    session_id: Optional[SessionID] = None
 
-
-@dataclass
 class SessionStartEvent(SessionEvent):
     """An event that indicates the start of a session."""
 
 
-@dataclass
 class SessionEndEvent(SessionEvent):
     """An event that indicates the end of a session."""
 
-    error: Optional[Exception] = None
+    error: Optional[str] = None
