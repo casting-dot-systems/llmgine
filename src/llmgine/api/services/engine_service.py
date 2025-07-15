@@ -5,7 +5,6 @@ Service for managing the engine, singleton pattern
 from datetime import datetime, timedelta
 import threading
 import time
-import uuid
 from typing import Optional
 
 from llmgine.llm import EngineID, SessionID
@@ -62,15 +61,16 @@ class EngineService:
         return self.engines.get(engine_id, None)
 
 
-    def create_engine(self, engine: Engine) -> EngineID:
+    def create_engine(self, engine: Engine) -> Optional[EngineID]:
         """
         Create an engine
+        None is returned if the max number of engines is reached
         """
         if len(self.engines) >= self.max_engines:
-            raise ValueError(f"Max engines reached: {self.max_engines}")
-        engine_id = EngineID(str(uuid.uuid4()))
-        self.engines[engine_id] = engine
-        return engine_id
+            return None
+
+        self.engines[engine.engine_id] = engine
+        return engine.engine_id
 
     def delete_engine(self, engine_id: EngineID) -> None:
         """
@@ -90,6 +90,7 @@ class EngineService:
         Update the last interaction time of an engine
         """
         if engine_id in self.engines:
+            self.update_engine_status(engine_id, EngineStatus.RUNNING)
             self.engines[engine_id].updated_at = datetime.now()
 
     def set_engine_idle_timeout(self, idle_timeout: int) -> None:
@@ -115,19 +116,21 @@ class EngineService:
             return self.engines.get(engine_id)
         return None
 
-    def register_engine(self, session_id: SessionID, engine_id: EngineID) -> None:
+    # TODO: Emit events when an engine is registered or unregistered, switched to another session or deleted
+    def register_engine(self, session_id: SessionID, engine_id: EngineID) -> Optional[EngineID]:
         """
         Register an engine to a session
         """
         if engine_id not in self.engines:
-            raise ValueError(f"Engine {engine_id} not found")
+            return None
         self.engine_registry[session_id] = engine_id
+        return engine_id
 
-    def unregister_engine(self, session_id: SessionID) -> None:
+    def unregister_engine(self, session_id: SessionID) -> Optional[EngineID]:
         """
         Unregister an engine from a session
         """
-        self.engine_registry.pop(session_id, None)
+        return self.engine_registry.pop(session_id, None)
 
     # --- Engine Monitoring ---
 

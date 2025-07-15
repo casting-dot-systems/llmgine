@@ -1,11 +1,12 @@
 from dataclasses import dataclass
 from typing import Any, Dict, List
+from pydantic import BaseModel
 
 from llmgine.llm import AsyncOrSyncToolFunction
 
 
 @dataclass
-class Parameter:
+class Parameter(BaseModel):
     """A parameter for a tool.
 
     Attributes:
@@ -36,7 +37,7 @@ class Parameter:
 
 
 @dataclass
-class Tool:
+class Tool(BaseModel):
     """Contains all information about a tool.
 
     Attributes:

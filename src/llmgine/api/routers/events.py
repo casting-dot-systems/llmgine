@@ -10,37 +10,17 @@ This router handles:
 
 from typing import List, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, Query
 
 from llmgine.api.models.events import EventFetchResponse
 from llmgine.llm import SessionID
-from llmgine.api.services.session_service import SessionService, SessionStatus
+from llmgine.api.services.session_service import SessionService
 from llmgine.bus.bus import MessageBus
-from llmgine.api.models import EventPublishResponse, EventListResponse, EventPublishStatus
+from llmgine.api.models import EventPublishResponse, EventListResponse, ResponseStatus
 from llmgine.messages.events import Event
+from llmgine.api.routers.dependencies import get_session_service, get_message_bus, validate_session
 
 router = APIRouter(prefix="/api/sessions/{session_id}/events", tags=["events"])
-
-
-# Dependency injection
-def get_session_service() -> SessionService:
-    """Get the session service singleton"""
-    return SessionService()
-
-def get_message_bus() -> MessageBus:
-    """Get the message bus singleton"""
-    return MessageBus()
-
-def validate_session(session_id: str, session_service: SessionService = Depends(get_session_service)) -> SessionID:
-    """Validate that the session exists and is active"""
-    session = session_service.get_session(SessionID(session_id))
-    if not session:
-        raise HTTPException(status_code=404, detail=f"Session {session_id} not found")
-    
-    if session.get_status() == SessionStatus.FAILED:
-        raise HTTPException(status_code=400, detail=f"Session {session_id} has failed status")
-    
-    return SessionID(session_id)
 
 @router.post("/", response_model=EventPublishResponse, status_code=201)
 async def publish_event(
@@ -69,7 +49,7 @@ async def publish_event(
             return EventPublishResponse(
                 event_id=event_request.event_id,
                 session_id=session_id,
-                status=EventPublishStatus.FAILED,
+                status=ResponseStatus.FAILED,
                 error=f"Event session_id {event_request.session_id} does not match session_id {session_id}"
             )
         
@@ -80,14 +60,14 @@ async def publish_event(
         return EventPublishResponse(
             event_id=event_request.event_id,
             session_id=session_id,
-            status=EventPublishStatus.PUBLISHED
+            status=ResponseStatus.SUCCESS
         )
         
     except Exception as e:
         return EventPublishResponse(
             event_id=event_request.event_id,
             session_id=session_id,
-            status=EventPublishStatus.FAILED,
+            status=ResponseStatus.FAILED,
             error=f"Failed to publish event: {str(e)}"
         )
 
@@ -128,7 +108,7 @@ async def get_events(
             total=total,
             limit=limit,
             offset=offset,
-            status=EventPublishStatus.PUBLISHED
+            status=ResponseStatus.SUCCESS
         )
         
     except Exception as e:
@@ -137,7 +117,7 @@ async def get_events(
             total=0,
             limit=limit,
             offset=offset,
-            status=EventPublishStatus.FAILED,
+            status=ResponseStatus.FAILED,
             error=f"Failed to retrieve events: {str(e)}"
         )
 
@@ -171,21 +151,21 @@ async def get_event(
             return EventFetchResponse(
                 event_id=event_id,
                 session_id=session_id,
-                status=EventPublishStatus.FAILED,
+                status=ResponseStatus.FAILED,
                 error=f"Event {event_id} not found"
             )
         
         return EventFetchResponse(
             event_id=event.event_id,
             session_id=session_id,
-            status=EventPublishStatus.PUBLISHED
+            status=ResponseStatus.SUCCESS
         )
         
     except Exception as e:
         return EventFetchResponse(
             event_id=event_id,
             session_id=session_id,
-            status=EventPublishStatus.FAILED,
+            status=ResponseStatus.FAILED,
             error=f"Failed to retrieve event: {str(e)}"
         )
 

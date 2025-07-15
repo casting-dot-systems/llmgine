@@ -1,12 +1,3 @@
-# POST /api/sessions
-# - Create a new session
-# - Returns session_id
-
-# DELETE /api/sessions/{session_id}
-# - End a session and cleanup handlers
-
-# GET /api/sessions/{session_id}/status
-# - Get session status and metadata
 
 """
 Session management router for the LLMGine API.
@@ -20,6 +11,7 @@ This router handles:
 from typing import Optional
 from fastapi import APIRouter, Depends
 
+from llmgine.api.models.sessions import SessionEndResponse
 from llmgine.api.services.session_service import SessionService
 from llmgine.llm import SessionID
 from llmgine.api.models import SessionCreateResponse, ResponseStatus
@@ -51,3 +43,19 @@ async def create_session(
             session_id=str(session_id),
             status=ResponseStatus.SUCCESS
         )
+
+@router.post("/{session_id}/end", response_model=SessionEndResponse, status_code=200)
+async def end_session(
+    session_id: str,
+    session_service: SessionService = Depends(get_session_service)
+) -> SessionEndResponse:
+    """
+    End a session
+    """
+    session_service.delete_session(SessionID(session_id))
+    
+    return SessionEndResponse(
+        session_id=str(session_id),
+        status=ResponseStatus.SUCCESS
+    )
+

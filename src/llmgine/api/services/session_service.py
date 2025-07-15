@@ -9,6 +9,7 @@ import time
 from typing import Optional
 import uuid
 
+from llmgine.api.services.engine_service import EngineService
 from llmgine.llm import SessionID
 
 #TODO Add logging
@@ -80,6 +81,7 @@ class SessionService:
         Update the last interaction time of a session
         """
         if session_id in self.sessions:
+            self.update_session_status(session_id, SessionStatus.RUNNING)
             self.sessions[session_id].update_last_interaction_at()
 
     def get_session(self, session_id: SessionID) -> Optional[Session]:
@@ -100,6 +102,10 @@ class SessionService:
         """
         Delete a session
         """
+        # Get engine service and unregister engine from this session
+        engine_service = EngineService()
+        engine_service.unregister_engine(session_id)
+        
         if session_id in self.sessions:
             self.sessions.pop(session_id)
 

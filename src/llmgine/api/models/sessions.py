@@ -8,3 +8,9 @@ class SessionCreateResponse(BaseModel):
     session_id: str
     status: ResponseStatus
     error: Optional[str] = None
+
+class SessionEndResponse(BaseModel):
+    """Response model for session end"""
+    session_id: str
+    status: ResponseStatus
+    error: Optional[str] = None

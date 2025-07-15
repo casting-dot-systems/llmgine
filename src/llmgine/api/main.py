@@ -6,7 +6,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 # Import routers
-from llmgine.api.routers import events, sessions
+from llmgine.api.routers import events, sessions, engines, commands
 
 app = FastAPI(
     title="LLMGine API",
@@ -26,6 +26,8 @@ app.add_middleware(
 # Include routers
 app.include_router(events.router)
 app.include_router(sessions.router)
+app.include_router(engines.router)
+app.include_router(commands.router)
 
 @app.get("/")
 async def root():
