@@ -66,6 +66,8 @@ class EngineService:
         Create an engine
         None is returned if the max number of engines is reached
         """
+
+        # TODO: Implement race condition protection
         if len(self.engines) >= self.max_engines:
             return None
 
@@ -91,7 +93,7 @@ class EngineService:
         """
         if engine_id in self.engines:
             self.update_engine_status(engine_id, EngineStatus.RUNNING)
-            self.engines[engine_id].updated_at = datetime.now()
+            self.engines[engine_id].updated_at = datetime.now().isoformat()
 
     def set_engine_idle_timeout(self, idle_timeout: int) -> None:
         """
@@ -143,9 +145,9 @@ class EngineService:
             engine_ids = list(self.engines.keys())
             for engine_id in engine_ids:
                 engine = self.engines[engine_id]
-                if engine.status == EngineStatus.RUNNING and engine.updated_at < datetime.now() - timedelta(seconds=self.idle_timeout):
+                if engine.status == EngineStatus.RUNNING and datetime.fromisoformat(engine.updated_at) < datetime.now() - timedelta(seconds=self.idle_timeout):
                     self.update_engine_status(engine_id, EngineStatus.IDLE)
-                if engine.status == EngineStatus.IDLE and engine.updated_at < datetime.now() - timedelta(seconds=self.delete_idle_timeout):
+                if engine.status == EngineStatus.IDLE and datetime.fromisoformat(engine.updated_at) < datetime.now() - timedelta(seconds=self.delete_idle_timeout):
                     self.delete_engine(engine_id)
             time.sleep(1)
 

@@ -9,18 +9,24 @@ class EngineCreateResponse(BaseModel):
     """Response model for engine creation"""
     engine_id: str
     status: ResponseStatus
+    message: str
     error: Optional[str] = None
 
 class EngineListResponse(BaseModel):
     """Response model for engine list"""
-    engines: dict[EngineID, Engine]
+    engines: list[Engine]
+    total: int
+    limit: int
+    offset: int
     status: ResponseStatus
+    message: str
     error: Optional[str] = None
 
 class EngineFetchResponse(BaseModel):
     """Response model for engine fetch"""
     engine: Optional[Engine]
     status: ResponseStatus
+    message: str
     error: Optional[str] = None
 
 class EngineConnectRequest(BaseModel):
@@ -31,10 +37,12 @@ class EngineConnectResponse(BaseModel):
     """Response model for engine connect"""
     engine_id: str
     status: ResponseStatus
+    message: str
     error: Optional[str] = None
 
 class EngineDisconnectResponse(BaseModel):
     """Response model for engine disconnect"""
     engine_id: str
     status: ResponseStatus
+    message: str
     error: Optional[str] = None

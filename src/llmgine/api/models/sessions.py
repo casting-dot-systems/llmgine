@@ -1,16 +1,38 @@
+"""
+Session-related Pydantic models for the LLMGine API.
+
+This module defines request and response models for session management
+endpoints including creation, termination, and status queries.
+"""
+
 from typing import Optional
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
+from datetime import datetime
 
-from llmgine.api.models.responses import ResponseStatus
+from llmgine.api.models.responses import BaseResponse
 
-class SessionCreateResponse(BaseModel):
-    """Response model for session creation"""
-    session_id: str
-    status: ResponseStatus
-    error: Optional[str] = None
 
-class SessionEndResponse(BaseModel):
-    """Response model for session end"""
-    session_id: str
-    status: ResponseStatus
-    error: Optional[str] = None
+class SessionCreateResponse(BaseResponse):
+    """Response model for session creation."""
+    session_id: Optional[str] = Field(None, description="Unique identifier for the created session")
+
+
+class SessionEndResponse(BaseResponse):
+    """Response model for session termination."""
+    session_id: str = Field(..., description="Unique identifier of the terminated session")
+
+
+class SessionStatusResponse(BaseResponse):
+    """Response model for session status queries."""
+    session_id: str = Field(..., description="Unique identifier of the session")
+    status: str = Field(..., description="Current status of the session")
+    created_at: datetime = Field(..., description="Timestamp when the session was created")
+    last_interaction_at: datetime = Field(..., description="Timestamp of the last interaction")
+
+
+class SessionListResponse(BaseResponse):
+    """Response model for listing sessions."""
+    sessions: list[dict] = Field(default_factory=list, description="List of active sessions")
+    total: int = Field(0, description="Total number of sessions")
+    limit: int = Field(50, description="Maximum number of sessions returned")
+    offset: int = Field(0, description="Number of sessions skipped")
