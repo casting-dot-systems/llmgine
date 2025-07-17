@@ -14,7 +14,6 @@ An engine file is split into 3 (or 4) sections:
 Each engine must have a command that takes in your prompt. 
 
 ```python
-@dataclass
 class CustomEngineCommand(Command):
     prompt: str = ""
     (and any other arguments you need)
@@ -27,7 +26,6 @@ This command will be used as the entry into your engine.
 Each engine must have a status event that is emitted when the engine is started.
 
 ```python
-@dataclass
 class CustomEngineStatusEvent(Event):
     status: str = ""
 ```
@@ -39,7 +37,6 @@ This event will be used to update the status of the engine. This is the loading 
 A prompt command is a command that gets a prompt from the user. Checkout the prompts class in the CLI for more information. 
 
 ```python
-@dataclass
 class PromptCommand(Command):
     prompt: str = ""
 ```
@@ -52,7 +49,7 @@ You can add other commands and events to your engine as needed. They will be reg
 
 ## Engine class
 
-The engine class is where you define your engine. 
+The engine class is where you define your engine. **The custom engine class must inherit from the Engine class in llm.engine.engine**
 
 The entry into your engine is the handle_command function. Which takes in your CustomEngineCommand and returns a CommandResult. See the CommandResult class in the bus.commands module for more information. 
 
