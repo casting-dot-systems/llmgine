@@ -39,7 +39,8 @@ class SinglePassEngine(Engine):
         self._session_id = session_id or SessionID(str(uuid.uuid4()))
         self._bus = MessageBus()
 
-    async def handle_command(self, command: SinglePassEngineCommand) -> CommandResult:
+    async def handle_command(self, command: Command) -> CommandResult:
+        assert isinstance(command, SinglePassEngineCommand), "command is not a SinglePassEngineCommand"
         try:
             result = await self.execute(command.prompt)
             return CommandResult(success=True, result=result)
@@ -94,7 +95,7 @@ async def main(case: int):
         await cli.main()
     elif case == 2:
         result = await use_single_pass_engine(
-            "Hello, world!", Gpt41Mini(Providers.OPENAI), "respond in pirate"
+            "Hello, world!", "respond in pirate"
         )
         print(result)
 

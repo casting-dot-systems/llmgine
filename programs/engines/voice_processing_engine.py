@@ -15,7 +15,6 @@ import json
 from pydantic import Field, PrivateAttr
 
 from llmgine.llm.engine.engine import Engine
-from llmgine.llm.models.model import Model
 from llmgine.llm.providers.response import LLMResponse
 from llmgine.messages.commands import CommandResult, Command
 from llmgine.bus.bus import MessageBus
@@ -92,7 +91,7 @@ class VoiceProcessingEngine(Engine):
         )
 
     async def handle_command(
-        self, command: VoiceProcessingEngineCommand
+        self, command: Command
     ) -> CommandResult:
         """Handle a prompt command following OpenAI tool usage pattern.
 
@@ -102,6 +101,7 @@ class VoiceProcessingEngine(Engine):
         Returns:
             CommandResult: The result of the command execution
         """
+        assert isinstance(command, VoiceProcessingEngineCommand), "command is not a VoiceProcessingEngineCommand"
         try:
             # Process the audio file and get the snippet
             audio_file, number_of_speakers = command.prompt.split("&")

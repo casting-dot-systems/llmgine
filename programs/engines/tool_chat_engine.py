@@ -75,7 +75,7 @@ class ToolChatEngine(Engine):
             engine_id=self.engine_id, session_id=self._session_id, llm_model_name="openai"
         )
 
-    async def handle_command(self, command: ToolChatEngineCommand) -> CommandResult:
+    async def handle_command(self, command: Command) -> CommandResult:
         """Handle a prompt command following OpenAI tool usage pattern.
 
         Args:
@@ -84,6 +84,9 @@ class ToolChatEngine(Engine):
         Returns:
             CommandResult: The result of the command execution
         """
+
+        assert isinstance(command, ToolChatEngineCommand), "command is not a ToolChatEngineCommand"
+        
         try:
             # 1. Add user message to history
             self._context_manager.store_string(command.prompt, "user")
