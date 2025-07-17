@@ -1,5 +1,6 @@
-from typing import Any, Dict, List
-from pydantic import BaseModel
+import asyncio
+from typing import Any, Dict, List, Optional
+from pydantic import BaseModel, Field
 
 from llmgine.llm import AsyncOrSyncToolFunction
 
@@ -14,16 +15,10 @@ class Parameter(BaseModel):
         required: Whether the parameter is required
     """
 
-    name: str
-    description: str
-    type: str
-    required: bool = False
-
-    def __init__(self, name: str, description: str, type: str, required: bool = False):
-        self.name = name
-        self.description = description or ""
-        self.type = type
-        self.required = required
+    name: str = Field(default_factory=str)
+    description: str = Field(default_factory=str)
+    type: str = Field(default_factory=str)
+    required: bool = Field(default=False)
 
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -44,12 +39,14 @@ class Tool(BaseModel):
         function: The function to call when the tool is invoked
         is_async: Whether the function is asynchronous
     """
+    name: str = Field(default_factory=str)
+    description: str = Field(default_factory=str)
+    parameters: List[Parameter] = Field(default_factory=list)
+    function: Optional[AsyncOrSyncToolFunction] = None
+    is_async: bool = Field(default=False)
 
-    name: str
-    description: str
-    parameters: List[Parameter]
-    function: AsyncOrSyncToolFunction
-    is_async: bool = False
+    class Config:
+        arbitrary_types_allowed = True
 
     def to_dict(self) -> Dict[str, Any]:
         return {

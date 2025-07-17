@@ -49,11 +49,9 @@ class ToolManager:
             tool: The tool to register
         """
 
-        name: str
-        tool: Tool
-        name, tool = self.__tool_register.register_tool(tool_function)
+        tool: Tool = self.__tool_register.register_tool(tool_function)
 
-        self.tools[name] = tool
+        self.tools[tool.name] = tool
 
         # Publish the tool registration event
         await self.message_bus.publish(

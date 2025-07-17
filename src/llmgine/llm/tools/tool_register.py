@@ -4,7 +4,7 @@ import inspect
 import logging
 import os
 import re
-from typing import Any, Dict, List, Tuple, Type
+from typing import Any, Dict, List, Type
 
 from llmgine.llm import AsyncOrSyncToolFunction
 from llmgine.llm.tools.tool import Parameter, Tool
@@ -13,7 +13,7 @@ logger = logging.getLogger(__name__)
 
 
 class ToolRegister:
-    def register_tool(self, function: AsyncOrSyncToolFunction) -> Tuple[str, Tool]:
+    def register_tool(self, function: AsyncOrSyncToolFunction) -> Tool:
         """Register a function as a tool.
 
         Args:
@@ -37,7 +37,7 @@ class ToolRegister:
             is_async=is_async,
         )
 
-        return name, tool  # TODO can't we just return the tool?
+        return tool
 
     def register_tools(self, platform_list: List[str]) -> Dict[str, Tool]:
         """Register all relevant tools for a list of platforms. Completely independent from register_tool.
@@ -49,8 +49,8 @@ class ToolRegister:
         tools: Dict[str, Tool] = {}
         for platform in platform_list:
             for function in self._get_functions_for_platform(platform):
-                name, tool = self.register_tool(function)
-                tools[name] = tool
+                tool = self.register_tool(function)
+                tools[tool.name] = tool
 
         return tools
 
