@@ -4,7 +4,7 @@ import uuid
 from anthropic import AsyncAnthropic
 import dotenv
 from pydantic import BaseModel
-from typing import List, Dict, Optional, Any
+from typing import Awaitable, Callable, List, Dict, Optional, Any
 from llmgine.bootstrap import ApplicationConfig
 from llmgine.llm.models.model import Model
 from llmgine.llm.providers.anthropic import AnthropicProvider, AnthropicResponse
@@ -22,7 +22,7 @@ class Claude35Haiku(Model):
 
     def __init__(self, provider: Providers) -> None:
         self.id = str(uuid.uuid4())
-        self.generate = None
+        self.generate : Callable[..., Awaitable[LLMResponse]] = self._generate_from_anthropic
         self._setProvider(provider)
 
     def _setProvider(self, provider: Providers) -> None:

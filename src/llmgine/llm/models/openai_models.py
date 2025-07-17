@@ -21,7 +21,7 @@ Current supported providers:
 
 import os
 import dotenv
-from typing import List, Dict, Optional, Literal, Union, Any
+from typing import Awaitable, Callable, List, Dict, Optional, Literal, Union, Any
 from llmgine.llm.models.model import Model
 from llmgine.llm.providers.openai import OpenAIResponse, OpenAIProvider, LLMResponse
 from llmgine.llm.providers.openrouter import OpenRouterProvider
@@ -55,7 +55,7 @@ class Gpt41(Model):
     """
 
     def __init__(self, provider: Providers) -> None:
-        self.generate = None
+        self.generate : Callable[..., Awaitable[LLMResponse]] = self._generate_openai
         self.model = "gpt-4.1-2025-04-14"
         self.api_key = os.getenv("OPENAI_API_KEY") or ""
         self.provider = self.__getProvider(provider)
@@ -73,7 +73,7 @@ class Gpt41(Model):
                 f"Provider {provider} not supported for {self.__class__.__name__}"
             )
 
-    def _generate_openai(
+    async def _generate_openai(
         self,
         messages: List[Dict[str, Any]],
         tools: Optional[List[ModelFormattedDictTool]] = None,
@@ -83,12 +83,12 @@ class Gpt41(Model):
         max_completion_tokens: int = 5068,
         response_format: Optional[Dict[str, Any]] = None,
         **kwargs: Any,
-    ) -> OpenAIResponse:
+    ) -> LLMResponse:
         """
         This method will hardcode a group of default parameters for the OpenAI provider for the GPT-4o Mini model.
         """
         # Update the parameters with the ones provided in the kwargs.
-        tmp = self.provider.generate(
+        tmp = await self.provider.generate(
             messages=messages,
             temperature=temperature,
             tools=tools,
@@ -102,7 +102,7 @@ class Gpt41(Model):
         assert isinstance(tmp, OpenAIResponse), "tmp is not an OpenAIResponse"
         return tmp
 
-    def _generate_openrouter(
+    async def _generate_openrouter(
         self,
         messages: List[Dict[str, Any]],
         tools: Optional[List[ModelFormattedDictTool]] = None,
@@ -117,7 +117,7 @@ class Gpt41(Model):
         """
         This method will construct a default group of parameters for the OpenRouter provider.
         """
-        tmp = self.provider.generate(
+        tmp = await self.provider.generate(
             messages=messages,
             temperature=temperature,
             tools=tools,
@@ -137,7 +137,7 @@ class Gpt41Mini(Model):
     """
 
     def __init__(self, provider: Providers) -> None:
-        self.generate = None
+        self.generate : Callable[..., Awaitable[LLMResponse]] = self._generate_openai
         self.model: str = "gpt-4.1-mini-2025-04-14"
         self.api_key: str = os.getenv("OPENAI_API_KEY") or ""
         assert self.api_key is not None, "OPENAI_API_KEY is not set"
@@ -223,7 +223,7 @@ class Gpt_4o_Mini_Latest(Model):
     """
 
     def __init__(self, provider: Providers, engine_id: Optional[str] = None) -> None:
-        self.generate = None
+        self.generate : Callable[..., Awaitable[LLMResponse]] = self._generate_openai
         self.api_key: str = os.getenv("OPENAI_API_KEY") or ""
         self.model: str = "gpt-4o-mini"
         self.provider = self.__getProvider(provider)
@@ -232,17 +232,17 @@ class Gpt_4o_Mini_Latest(Model):
     def __getProvider(self, provider: Providers) -> LLMProvider:
         """Get the provider and set the generate method."""
         if provider == Providers.OPENROUTER:
-            self.generate = self.__generate_openrouter
+            self.generate = self._generate_openrouter
             return OpenRouterProvider(self.api_key, self.model)
         elif provider == Providers.OPENAI:
-            self.generate = self.__generate_openai
+            self.generate = self._generate_openai
             return OpenAIProvider(self.api_key, self.model)
         else:
             raise ValueError(
                 f"Provider {provider} not supported for {self.__class__.__name__}"
             )
 
-    async def __generate_openai(
+    async def _generate_openai(
         self,
         messages: List[Dict[str, Any]],
         tools: Optional[List[ModelFormattedDictTool]] = None,
@@ -272,7 +272,7 @@ class Gpt_4o_Mini_Latest(Model):
         assert isinstance(tmp, OpenAIResponse), "tmp is not an OpenAIResponse"
         return tmp
 
-    async def __generate_openrouter(
+    async def _generate_openrouter(
         self,
         messages: List[Dict[str, Any]],
         tools: Optional[List[ModelFormattedDictTool]] = None,
@@ -307,7 +307,7 @@ class Gpt_o3_Mini(Model):
     """
 
     def __init__(self, provider: Providers) -> None:
-        self.generate = None
+        self.generate : Callable[..., Awaitable[LLMResponse]] = self._generate_openai
         self.api_key: str = os.getenv("OPENAI_API_KEY") or ""
         assert self.api_key is not None, "OPENAI_API_KEY is not set"
 
@@ -317,17 +317,17 @@ class Gpt_o3_Mini(Model):
     def __getProvider(self, provider: Providers) -> LLMProvider:
         """Get the provider and set the generate method."""
         if provider == Providers.OPENROUTER:
-            self.generate = self.__generate_openrouter
+            self.generate = self._generate_openrouter
             return OpenRouterProvider(self.api_key, self.model)
         elif provider == Providers.OPENAI:
-            self.generate = self.__generate_openai
+            self.generate = self._generate_openai
             return OpenAIProvider(self.api_key, self.model)
         else:
             raise ValueError(
                 f"Provider {provider} not supported for {self.__class__.__name__}"
             )
 
-    async def __generate_openai(
+    async def _generate_openai(
         self,
         messages: List[Dict[str, Any]],
         tools: Optional[List[ModelFormattedDictTool]] = None,
@@ -356,7 +356,7 @@ class Gpt_o3_Mini(Model):
         assert isinstance(tmp, OpenAIResponse), "tmp is not an OpenAIResponse"
         return tmp
 
-    async def __generate_openrouter(
+    async def _generate_openrouter(
         self,
         messages: List[Dict[str, Any]],
         tools: Optional[List[ModelFormattedDictTool]] = None,
