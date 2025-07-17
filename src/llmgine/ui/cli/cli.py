@@ -1,11 +1,11 @@
 import asyncio
 import os
 import sys
-from dataclasses import dataclass
 from typing import Any, Callable, Optional, Type
 
 from rich.live import Live
 from rich.spinner import Spinner
+from pydantic import Field
 
 from llmgine.bus.bus import AsyncOrSyncCommandHandler, MessageBus
 from llmgine.llm import SessionID
@@ -27,9 +27,8 @@ from llmgine.ui.cli.components import (
 )
 
 
-@dataclass
 class StatusEvent(Event):
-    status: str = ""
+    status: str = Field(default_factory=str)
 
 
 class EngineCLI:

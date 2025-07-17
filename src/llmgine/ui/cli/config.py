@@ -1,5 +1,5 @@
 from dataclasses import dataclass
-from typing import Type, Dict, Any, Tuple, Self, cast
+from typing import Type, Dict, Any, Self, cast
 
 class Singleton:
     """

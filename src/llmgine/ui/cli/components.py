@@ -1,12 +1,12 @@
 import asyncio
 from abc import ABC, abstractmethod
-from dataclasses import dataclass
 from typing import TYPE_CHECKING, Optional
 
 from prompt_toolkit import HTML, PromptSession
 from rich import print
 from rich.panel import Panel
 from rich.prompt import Confirm
+from pydantic import Field
 
 from llmgine.messages.commands import Command, CommandResult
 from llmgine.messages.events import Event
@@ -36,9 +36,8 @@ class CLIPrompt(ABC):
         pass
 
 
-@dataclass
 class UserComponentEvent(Event):
-    text: str = ""
+    text: str = Field(default_factory=str)
 
 
 class UserComponent(CLIComponent):
@@ -71,10 +70,9 @@ class UserComponent(CLIComponent):
         return {"role": "user", "content": self.text}
 
 
-@dataclass
 class EngineResultCommandResult(CommandResult):
-    result: str = ""
-    success: bool = True
+    result: str = Field(default_factory=str)
+    success: bool = Field(default=True)
 
 
 class EngineResultComponent(CLIComponent):
@@ -98,9 +96,8 @@ class EngineResultComponent(CLIComponent):
         )
 
 
-@dataclass
 class AssistantResultEvent(Event):
-    text: str = ""
+    text: str = Field(default_factory=str)
 
 
 class AssistantComponent(CLIComponent):
@@ -124,10 +121,9 @@ class AssistantComponent(CLIComponent):
         )
 
 
-@dataclass
 class ToolResultEvent(Event):
-    tool_name: str = ""
-    result: str = ""
+    tool_name: str = Field(default_factory=str)
+    result: str = Field(default_factory=str)
 
 
 class ToolComponent(CLIComponent):
@@ -175,9 +171,8 @@ class ToolComponentShort(CLIComponent):
         )
 
 
-@dataclass
 class UserGeneralInputCommand(Command):
-    prompt: str = ""
+    prompt: str = Field(default_factory=str)
 
 
 class UserGeneralInput(CLIPrompt):
@@ -228,9 +223,8 @@ class UserGeneralInput(CLIPrompt):
             return UserComponent.from_text(self.result)
 
 
-@dataclass
 class YesNoPromptCommand(Event):
-    prompt: str = ""
+    prompt: str = Field(default_factory=str)
 
 
 class YesNoPrompt(CLIPrompt):
@@ -266,11 +260,10 @@ class YesNoPrompt(CLIPrompt):
         self.cli = None
 
 
-@dataclass
 class SelectPromptCommand(Command):
-    prompt: str = ""
-    option_number: int = 0
-    title: str = ""
+    prompt: str = Field(default_factory=str)
+    option_number: int = Field(default=0)
+    title: str = Field(default_factory=str)
 
 
 class SelectPrompt(CLIPrompt):
