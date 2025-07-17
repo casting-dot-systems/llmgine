@@ -56,14 +56,14 @@ async def execute_command(
         # Execute command
         command_result : CommandResult = await message_bus.execute(command)
         
-    except Exception as e:
+    except (ValueError, Exception) as e:
         return CommandExecuteResponse(
             command_id=command.command_id,
             session_id=session_id,
             status=ResponseStatus.FAILED,
             error=str(e)
         )
-
+    print("here")
     return CommandExecuteResponse(
         command_id=command.command_id,
         session_id=session_id,

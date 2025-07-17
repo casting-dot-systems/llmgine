@@ -255,6 +255,9 @@ async def websocket_endpoint(
                 # Receive message from client
                 message = await websocket.receive_text()
                 
+                # Update session activity
+                session_service.update_session_last_interaction_at(SessionID(session_id))
+
                 try:
                     data = json.loads(message)
                     message_type = data.get("type")

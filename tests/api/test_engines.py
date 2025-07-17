@@ -5,6 +5,7 @@ This module contains comprehensive tests for engine management endpoints
 including creation, listing, retrieval, connection, and disconnection.
 """
 
+import pytest
 from unittest.mock import Mock, patch
 from fastapi.testclient import TestClient
 from fastapi import status
@@ -13,6 +14,7 @@ from llmgine.api.main import app
 from llmgine.api.models.responses import ResponseStatus
 from llmgine.api.services.engine_service import EngineService
 from llmgine.api.services.session_service import SessionService, SessionStatus
+from llmgine.api.utils.error_handler import SessionIDValidationError
 from llmgine.llm import EngineID, SessionID
 from llmgine.llm.engine.engine import Engine, EngineStatus
 from llmgine.api.routers.dependencies import get_engine_service, validate_session
@@ -354,6 +356,24 @@ class TestEngineValidation:
             )
             assert response2.status_code == status.HTTP_400_BAD_REQUEST
 
+    def test_invalid_session_id(self):
+        """Test engine operations with invalid session ID."""
+        # Arrange
+        invalid_session_id = "invalid-session"
+        app.dependency_overrides.clear()
+
+        # Mock session validation failure
+        with patch('llmgine.api.routers.dependencies.validate_session'):
+            # Test engine creation
+            response = self.client.post(
+                f"/api/sessions/{invalid_session_id}/engines/",
+                json={"engine": Engine().model_dump()}
+            )
+            assert response.status_code == status.HTTP_500_INTERNAL_SERVER_ERROR
+            
+            # Test engine listing
+            response = self.client.get(f"/api/sessions/{invalid_session_id}/engines/")
+            assert response.status_code == status.HTTP_500_INTERNAL_SERVER_ERROR
 
 class TestEngineServiceErrors:
     """Test suite for engine service error handling."""

@@ -13,6 +13,7 @@ from typing import List, Optional
 from fastapi import APIRouter, Depends, Query
 
 from llmgine.api.models.events import EventFetchResponse
+from llmgine.api.utils.error_handler import ValidationError
 from llmgine.llm import SessionID
 from llmgine.api.services.session_service import SessionService
 from llmgine.bus.bus import MessageBus
@@ -91,8 +92,18 @@ async def get_events(
         
     Returns:
         List of events with pagination info
+
+    Raises:
+        ValidationError: If limit is greater than 100 or offset is less than 0
     """
+
     try:
+        # Check limit and offset range
+        if limit < 1 or limit > 100:
+            raise ValidationError("limit", "Limit must be between 1 and 100", limit)
+        if offset < 0:
+            raise ValidationError("offset", "Offset must be greater than or equal to 0", offset)
+
         # Update session last interaction time
         session_service.update_session_last_interaction_at(SessionID(session_id))
         

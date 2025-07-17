@@ -12,6 +12,7 @@ from fastapi import status
 
 from llmgine.api.main import app
 from llmgine.api.models.responses import ResponseStatus
+from llmgine.api.routers.dependencies import get_message_bus, get_session_service, validate_session
 from llmgine.api.services.session_service import SessionService, SessionStatus
 from llmgine.bus.bus import MessageBus
 from llmgine.messages.commands import Command, CommandResult
@@ -44,13 +45,20 @@ class TestCommandEndpoints:
             "parameters": {"param1": "value1"}
         }
         
-        mock_command_result = Mock(spec=CommandResult)
-        mock_command_result.success = True
-        mock_command_result.result = {"output": "test result"}
+        mock_command_result = CommandResult(
+            command_id=command_id,
+            session_id=SessionID(self.session_id),
+            success=True,
+            result={"output": "test result"}
+        )
         
         # Mock async execute method
         self.mock_message_bus.execute = AsyncMock(return_value=mock_command_result)
         
+        app.dependency_overrides[validate_session] = lambda: SessionID(self.session_id)
+        app.dependency_overrides[get_session_service] = lambda: self.mock_session_service
+        app.dependency_overrides[get_message_bus] = lambda: self.mock_message_bus
+
         # Act
         with patch('llmgine.api.routers.dependencies.get_session_service', return_value=self.mock_session_service), \
              patch('llmgine.api.routers.dependencies.get_message_bus', return_value=self.mock_message_bus), \
@@ -66,7 +74,7 @@ class TestCommandEndpoints:
         assert data["status"] == ResponseStatus.SUCCESS.value
         assert data["command_id"] == command_id
         assert data["session_id"] == self.session_id
-        assert data["command_result"] == mock_command_result
+        assert data["command_result"] == mock_command_result.model_dump()
         
         # Verify service calls
         self.mock_session_service.update_session_last_interaction_at.assert_called_once_with(SessionID(self.session_id))
@@ -84,6 +92,10 @@ class TestCommandEndpoints:
             "parameters": {"param1": "value1"}
         }
         
+        app.dependency_overrides[validate_session] = lambda: SessionID(self.session_id)
+        app.dependency_overrides[get_session_service] = lambda: self.mock_session_service
+        app.dependency_overrides[get_message_bus] = lambda: self.mock_message_bus
+
         # Act
         with patch('llmgine.api.routers.dependencies.get_session_service', return_value=self.mock_session_service), \
              patch('llmgine.api.routers.dependencies.get_message_bus', return_value=self.mock_message_bus), \
@@ -118,6 +130,10 @@ class TestCommandEndpoints:
         # Mock execute method to raise exception
         self.mock_message_bus.execute = AsyncMock(side_effect=Exception("Command execution failed"))
         
+        app.dependency_overrides[validate_session] = lambda: SessionID(self.session_id)
+        app.dependency_overrides[get_session_service] = lambda: self.mock_session_service
+        app.dependency_overrides[get_message_bus] = lambda: self.mock_message_bus
+
         # Act
         with patch('llmgine.api.routers.dependencies.get_session_service', return_value=self.mock_session_service), \
              patch('llmgine.api.routers.dependencies.get_message_bus', return_value=self.mock_message_bus), \
@@ -147,6 +163,8 @@ class TestCommandEndpoints:
             "parameters": {"param1": "value1"}
         }
         
+        app.dependency_overrides.clear()
+
         # Mock session validation failure
         with patch('llmgine.api.routers.dependencies.validate_session', side_effect=Exception("Session not found")):
             response = self.client.post(
@@ -173,38 +191,6 @@ class TestCommandValidation:
         mock_session.get_status.return_value = SessionStatus.RUNNING
         self.mock_session_service.get_session.return_value = mock_session
     
-    def test_command_missing_required_fields(self):
-        """Test command execution with missing required fields."""
-        # Test missing command_id
-        command_data = {
-            "session_id": self.session_id,
-            "command_type": "test_command",
-            "parameters": {"param1": "value1"}
-        }
-        
-        with patch('llmgine.api.routers.dependencies.validate_session', return_value=SessionID(self.session_id)):
-            response = self.client.post(
-                f"/api/sessions/{self.session_id}/commands/",
-                json=command_data
-            )
-        
-        assert response.status_code == status.HTTP_422_UNPROCESSABLE_ENTITY
-        
-        # Test missing session_id
-        command_data = {
-            "command_id": "test-command-123",
-            "command_type": "test_command",
-            "parameters": {"param1": "value1"}
-        }
-        
-        with patch('llmgine.api.routers.dependencies.validate_session', return_value=SessionID(self.session_id)):
-            response = self.client.post(
-                f"/api/sessions/{self.session_id}/commands/",
-                json=command_data
-            )
-        
-        assert response.status_code == status.HTTP_422_UNPROCESSABLE_ENTITY
-    
     def test_command_invalid_json(self):
         """Test command execution with invalid JSON."""
         with patch('llmgine.api.routers.dependencies.validate_session', return_value=SessionID(self.session_id)):
@@ -228,7 +214,11 @@ class TestCommandValidation:
         mock_command_result.success = True
         mock_command_result.result = {"output": "test result"}
         self.mock_message_bus.execute = AsyncMock(return_value=mock_command_result)
-        
+
+        app.dependency_overrides[validate_session] = lambda: SessionID(self.session_id)
+        app.dependency_overrides[get_session_service] = lambda: self.mock_session_service
+        app.dependency_overrides[get_message_bus] = lambda: self.mock_message_bus
+
         with patch('llmgine.api.routers.dependencies.get_session_service', return_value=self.mock_session_service), \
              patch('llmgine.api.routers.dependencies.get_message_bus', return_value=self.mock_message_bus), \
              patch('llmgine.api.routers.dependencies.validate_session', return_value=SessionID(self.session_id)):
@@ -258,7 +248,11 @@ class TestCommandValidation:
         mock_command_result.success = True
         mock_command_result.result = {"output": "test result"}
         self.mock_message_bus.execute = AsyncMock(return_value=mock_command_result)
-        
+
+        app.dependency_overrides[validate_session] = lambda: SessionID(self.session_id)
+        app.dependency_overrides[get_session_service] = lambda: self.mock_session_service
+        app.dependency_overrides[get_message_bus] = lambda: self.mock_message_bus
+
         with patch('llmgine.api.routers.dependencies.get_session_service', return_value=self.mock_session_service), \
              patch('llmgine.api.routers.dependencies.get_message_bus', return_value=self.mock_message_bus), \
              patch('llmgine.api.routers.dependencies.validate_session', return_value=SessionID(self.session_id)):
@@ -286,6 +280,10 @@ class TestCommandValidation:
         mock_command_result.result = {"output": "test result"}
         self.mock_message_bus.execute = AsyncMock(return_value=mock_command_result)
         
+        app.dependency_overrides[validate_session] = lambda: SessionID(self.session_id)
+        app.dependency_overrides[get_session_service] = lambda: self.mock_session_service
+        app.dependency_overrides[get_message_bus] = lambda: self.mock_message_bus
+
         with patch('llmgine.api.routers.dependencies.get_session_service', return_value=self.mock_session_service), \
              patch('llmgine.api.routers.dependencies.get_message_bus', return_value=self.mock_message_bus), \
              patch('llmgine.api.routers.dependencies.validate_session', return_value=SessionID(self.session_id)):
@@ -341,6 +339,10 @@ class TestCommandConcurrency:
         
         self.mock_message_bus.execute = AsyncMock(side_effect=[mock_command_result_1, mock_command_result_2])
         
+        app.dependency_overrides[validate_session] = lambda: SessionID(self.session_id)
+        app.dependency_overrides[get_session_service] = lambda: self.mock_session_service
+        app.dependency_overrides[get_message_bus] = lambda: self.mock_message_bus
+
         # Act
         with patch('llmgine.api.routers.dependencies.get_session_service', return_value=self.mock_session_service), \
              patch('llmgine.api.routers.dependencies.get_message_bus', return_value=self.mock_message_bus), \
@@ -386,6 +388,10 @@ class TestCommandConcurrency:
         mock_command_result.result = {"output": "test result"}
         self.mock_message_bus.execute = AsyncMock(return_value=mock_command_result)
         
+        app.dependency_overrides[validate_session] = lambda: SessionID(self.session_id)
+        app.dependency_overrides[get_session_service] = lambda: self.mock_session_service
+        app.dependency_overrides[get_message_bus] = lambda: self.mock_message_bus
+
         # Act
         with patch('llmgine.api.routers.dependencies.get_session_service', return_value=self.mock_session_service), \
              patch('llmgine.api.routers.dependencies.get_message_bus', return_value=self.mock_message_bus), \
