@@ -4,19 +4,18 @@ import uuid
 from anthropic import AsyncAnthropic
 import dotenv
 from pydantic import BaseModel
-from typing import List, Dict, Optional, Literal, Union, Any
+from typing import List, Dict, Optional, Any
 from llmgine.bootstrap import ApplicationConfig
 from llmgine.llm.models.model import Model
 from llmgine.llm.providers.anthropic import AnthropicProvider, AnthropicResponse
 from llmgine.llm.providers import Providers
-from llmgine.llm.providers.providers import Provider
 from llmgine.llm.providers.response import LLMResponse
 import instructor
 from llmgine.llm import ToolChoiceOrDictType, ModelFormattedDictTool
 
 dotenv.load_dotenv()
 
-class Claude35Haiku:
+class Claude35Haiku(Model):
     """
     Claude 3.5 Haiku
     """
@@ -29,7 +28,7 @@ class Claude35Haiku:
     def _setProvider(self, provider: Providers) -> None:
         """Get the provider and set the generate method."""
         if provider == Providers.ANTHROPIC:
-            self.api_key = os.getenv("ANTHROPIC_API_KEY")
+            self.api_key = os.getenv("ANTHROPIC_API_KEY") or ""
             self.model = "claude-3-5-haiku-20241022"
             self.provider = AnthropicProvider(
                 self.api_key, self.model, self.id
@@ -53,7 +52,7 @@ class Claude35Haiku:
         thinking_budget: Optional[int] = None,
         instruct: bool = False,
         response_model: Optional[BaseModel] = None,
-        **kwargs,
+        **kwargs: Any,
     ) -> LLMResponse:
         if not instruct:
             result = await self.provider.generate(
@@ -89,7 +88,6 @@ class HowAmI(BaseModel):
     reason: str
 
 async def main() -> None:
-    import asyncio
     from llmgine.bootstrap import ApplicationBootstrap
     app = ApplicationBootstrap(ApplicationConfig(enable_console_handler=False))
     await app.bootstrap()

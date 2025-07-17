@@ -1,18 +1,17 @@
 import os
 import uuid
 import dotenv
-from typing import List, Dict, Optional, Literal, Union, Any
+from typing import List, Dict, Optional, Any
 from llmgine.llm.models.model import Model
-from llmgine.llm.providers.openrouter import OpenRouterProvider, OpenRouterResponse
+from llmgine.llm.providers.openrouter import OpenRouterProvider
 from llmgine.llm.providers import Providers
-from llmgine.llm.providers.providers import Provider
 from llmgine.llm.providers.response import LLMResponse
 from llmgine.llm import ToolChoiceOrDictType, ModelFormattedDictTool
 
 dotenv.load_dotenv()
 
 
-class Gemini25FlashPreview:
+class Gemini25FlashPreview(Model):
     """
     Gemini 2.5 Flash Preview
     """
@@ -37,7 +36,7 @@ class Gemini25FlashPreview:
                 f"Provider {provider} not supported for {self.__class__.__name__}"
             )
 
-    def _generate_from_openrouter(
+    async def _generate_from_openrouter(
         self,
         messages: List[Dict[str, Any]],
         tools: Optional[List[ModelFormattedDictTool]] = None,
@@ -47,7 +46,7 @@ class Gemini25FlashPreview:
     ) -> LLMResponse:
         
 
-        tmp = self.provider.generate(
+        tmp = await self.provider.generate(
             messages=messages,
             tools=tools,
             tool_choice=tool_choice,

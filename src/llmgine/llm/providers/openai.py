@@ -119,7 +119,7 @@ class OpenAIProvider(LLMProvider):
             await self.bus.publish(
                 LLMResponseEvent(
                     call_id=call_id,
-                    error=e,
+                    error=str(e),
                 )
             )
             raise e
