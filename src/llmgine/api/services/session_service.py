@@ -43,12 +43,12 @@ class SessionService:
     Service for managing sessions, singleton pattern
     """
 
-    _instance = None
+    _instance: Optional["SessionService"] = None
 
     def __new__(cls):
         if cls._instance is None:
             cls._instance = super(SessionService, cls).__new__(cls)
-            cls._instance.__init__()
+            cls._instance._initialized = False
         return cls._instance
     
     def __init__(self):
@@ -59,12 +59,17 @@ class SessionService:
         - delete_idle_timeout: time in seconds after which an idle session is deleted
         - monitor_thread: thread for monitoring sessions
         """
+
+        if getattr(self, "_initialized", False):
+            return
+        
         self.sessions : dict[SessionID, Session] = {}
         self.max_sessions = 100
         self.idle_timeout = 300 # 5 minutes
         self.delete_idle_timeout = 600 # 10 minutes
         self.monitor_thread = threading.Thread(target=self.monitor_sessions)
         self.monitor_thread.start()
+        self._initialized = True
 
     def create_session(self) -> Optional[SessionID]:
         """

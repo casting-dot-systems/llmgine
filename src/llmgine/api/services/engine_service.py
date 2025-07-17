@@ -17,12 +17,12 @@ class EngineService:
     Service for managing the engine, singleton pattern
     """
 
-    _instance = None
+    _instance: Optional["EngineService"] = None
 
     def __new__(cls):
         if cls._instance is None:
             cls._instance = super(EngineService, cls).__new__(cls)
-            cls._instance.__init__()
+            cls._instance._initialized = False
         return cls._instance
 
     def __init__(self):
@@ -35,6 +35,10 @@ class EngineService:
         - delete_idle_timeout: time in seconds after which an idle engine is deleted
         - monitor_thread: thread for monitoring engines
         """
+
+        if getattr(self, "_initialized", False):
+            return
+        
         # key: engine_id, value: engine
         self.engines : dict[EngineID, Engine] = {}
         # key: session_id, value: engine_id
@@ -44,6 +48,7 @@ class EngineService:
         self.delete_idle_timeout = 6000 # 60 minutes
         self.monitor_thread = threading.Thread(target=self.monitor_engines)
         self.monitor_thread.start()
+        self._initialized = True
 
     # --- Engine Management ---
 

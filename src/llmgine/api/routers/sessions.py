@@ -221,10 +221,11 @@ async def websocket_endpoint(
         - Connection is automatically closed if session becomes invalid
     """
     await websocket.accept()
-    
+    print("accepted")
     try:
         # Validate session exists
         session = session_service.get_session(SessionID(session_id))
+
         if not session:
             await websocket.send_text(json.dumps({
                 "type": "error",
@@ -233,9 +234,10 @@ async def websocket_endpoint(
                     "message": f"Session '{session_id}' not found or has expired"
                 }
             }))
+
             await websocket.close(code=4004)
             return
-        
+        print("sending connected")
         # Send connection confirmation
         await websocket.send_text(json.dumps({
             "type": "connected",
@@ -245,10 +247,10 @@ async def websocket_endpoint(
                 "message": "WebSocket connection established"
             }
         }))
-        
+        print("sent connected")
         # Update session activity
         session_service.update_session_last_interaction_at(SessionID(session_id))
-        
+        print("updated session activity")
         # Handle incoming messages
         while True:
             try:
