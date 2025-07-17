@@ -1,10 +1,9 @@
-from dataclasses import dataclass, field
 from typing import Any, Dict, List
+from pydantic import Field
 
 from llmgine.messages.events import Event
 
 
-@dataclass
 class ContextEvent(Event):
     """Base class for all context events."""
 
@@ -12,15 +11,13 @@ class ContextEvent(Event):
     context_manager_id: str = ""
 
 
-@dataclass
 class ChatHistoryRetrievedEvent(ContextEvent):
     """Event for when chat history is retrieved."""
 
-    context: List[Dict[str, Any]] = field(default_factory=list)
+    context: List[Dict[str, Any]] = Field(default_factory=list)
 
 
-@dataclass
 class ChatHistoryUpdatedEvent(ContextEvent):
     """Event for when chat history is updated."""
 
-    context: List[Dict[str, Any]] = field(default_factory=list)
+    context: List[Dict[str, Any]] = Field(default_factory=list)

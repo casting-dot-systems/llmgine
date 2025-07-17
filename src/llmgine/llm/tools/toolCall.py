@@ -1,9 +1,7 @@
-from dataclasses import dataclass
 from typing import Any, Dict
+from pydantic import BaseModel
 
-
-@dataclass
-class ToolCall:
+class ToolCall(BaseModel):
     """Represents a tool call from an LLM."""
 
     id: str
