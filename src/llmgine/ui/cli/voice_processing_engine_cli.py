@@ -1,19 +1,20 @@
 from typing import Optional
-from dataclasses import dataclass
+from pydantic import Field
 from prompt_toolkit import PromptSession
 from rich.panel import Panel
 from rich import print
 from prompt_toolkit import HTML, PromptSession
 
+from llmgine.llm import SessionID
 from llmgine.messages.commands import Command
 from llmgine.ui.cli.cli import EngineCLI
 from llmgine.ui.cli.components import CLIPrompt, CLIComponent
 from llmgine.ui.cli.config import CLIConfig
 from llmgine.messages.events import Event
-@dataclass
+
 class SpecificComponentEvent(Event):
-    text: str = ""
-    field: str = ""
+    text: str = Field(default_factory=str)
+    field: str = Field(default_factory=str)
 
 class SpecificComponent(CLIComponent):
     """
@@ -45,10 +46,9 @@ class SpecificComponent(CLIComponent):
     def serialize(self):
         return {"role": "user", "content": self.field + ": " + self.text}
 
-@dataclass
 class SpecificPromptCommand(Command):
-    prompt: str = ""
-    field: str = ""
+    prompt: str = Field(default_factory=str)
+    field: str = Field(default_factory=str)
 
 # Custom user prompt
 class SpecificPrompt(CLIPrompt):
@@ -102,7 +102,7 @@ class SpecificPrompt(CLIPrompt):
 # ----------------------------------CUSTOM ENGINE CLI-----------------------------------
 
 class VoiceProcessingEngineCLI(EngineCLI):
-    def __init__(self, session_id: str):
+    def __init__(self, session_id: SessionID):
         super().__init__(session_id)
 
     async def main(self):
@@ -125,7 +125,7 @@ class VoiceProcessingEngineCLI(EngineCLI):
             else:
                 print(result.error)
 
-    async def main_input(self, field: Optional[str] = None):
+    async def main_input(self, field: Optional[str] = None) -> Optional[str]:
         if field is None:
             prompt = SpecificPrompt.from_prompt("Do you want to continue?", self)
         else:

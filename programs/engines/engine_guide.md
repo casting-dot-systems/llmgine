@@ -49,8 +49,19 @@ You can add other commands and events to your engine as needed. They will be reg
 
 ## Engine class
 
-The engine class is where you define your engine. **The custom engine class must inherit from the Engine class in llm.engine.engine**
+The engine class is where you define your engine. **The custom engine class must inherit from the Engine class in [src/llmgine/llm/engine/engine.py](../../src/llmgine/llm/engine/engine.py)**
 
+### Private Attributes
+Any attribute that is kept for internal use and is not going to be passed through api calls, assign it with the PrivateAttr() as below with _ as prefix.
+```python
+    _message_bus: MessageBus = PrivateAttr()
+```
+Then initialize it in \_\_init\_\_():
+```python
+    self._message_bus = MessageBus()
+```
+
+### Engine Entry
 The entry into your engine is the handle_command function. Which takes in your CustomEngineCommand and returns a CommandResult. See the CommandResult class in the bus.commands module for more information. 
 
 ```python

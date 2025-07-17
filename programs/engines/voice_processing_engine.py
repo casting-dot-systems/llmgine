@@ -12,10 +12,11 @@ To delete a fact, construct the content as follows:
 from typing import Optional
 import uuid
 import json
-from dataclasses import dataclass
+from pydantic import Field, PrivateAttr
 
 from llmgine.llm.engine.engine import Engine
 from llmgine.llm.models.model import Model
+from llmgine.llm.providers.response import LLMResponse
 from llmgine.messages.commands import CommandResult, Command
 from llmgine.bus.bus import MessageBus
 from llmgine.messages.events import Event
@@ -46,45 +47,48 @@ SYSTEM_PROMPT = (
 )
 
 
-@dataclass
 class VoiceProcessingEngineCommand(Command):
-    prompt: str = ""
+    prompt: str = Field(default_factory=str)
 
 
-@dataclass
 class VoiceProcessingEngineStatusEvent(Event):
-    status: str = ""
+    status: str = Field(default_factory=str)
 
 
-@dataclass
 class VoiceProcessingEngineToolResultEvent(Event):
-    tool_name: str = ""
-    result: str = ""
+    tool_name: str = Field(default_factory=str)
+    result: str = Field(default_factory=str)
 
 
 # ------------------------------------ENGINE-------------------------------------------
 
 
 class VoiceProcessingEngine(Engine):
+    _llm_manager: Gpt41Mini = PrivateAttr()
+    _system_prompt: Optional[str] = PrivateAttr()
+    _session_id: SessionID = PrivateAttr()
+    _message_bus: MessageBus = PrivateAttr()
+    _context_manager: SimpleChatHistory = PrivateAttr()
+    _tool_manager: ToolManager = PrivateAttr()
+
     def __init__(
         self,
-        model: Model,  # TODO This name and class could be more descriptive
         system_prompt: Optional[str] = None,
-        session_id: SessionID = SessionID("test"),
+        session_id: Optional[SessionID] = None,
     ):
-        self.model: Model = model
-        self.system_prompt: Optional[str] = system_prompt
-        self.session_id: SessionID = SessionID(session_id)
-        self.message_bus: MessageBus = MessageBus()
-        self.engine_id: str = str(uuid.uuid4())
+        super().__init__()
+        self._system_prompt: Optional[str] = system_prompt
+        self._session_id: SessionID = session_id or SessionID(str(uuid.uuid4()))
+        self._message_bus: MessageBus = MessageBus()
+        self._engine_id: str = str(uuid.uuid4())
 
         # Create tightly coupled components - pass the simple engine
-        self.context_manager = SimpleChatHistory(
-            engine_id=self.engine_id, session_id=self.session_id
+        self._context_manager = SimpleChatHistory(
+            engine_id=self._engine_id, session_id=self._session_id
         )
-        self.llm_manager = Gpt41Mini(Providers.OPENAI)
-        self.tool_manager = ToolManager(
-            engine_id=self.engine_id, session_id=self.session_id, llm_model_name="openai"
+        self._llm_manager = Gpt41Mini(Providers.OPENAI)
+        self._tool_manager = ToolManager(
+            engine_id=self._engine_id, session_id=self._session_id, llm_model_name="openai"
         )
 
     async def handle_command(
@@ -127,21 +131,21 @@ class VoiceProcessingEngine(Engine):
             prompt: The prompt to execute
         """
 
-        self.context_manager.store_string(prompt, "user")
+        self._context_manager.store_string(prompt, "user")
 
         while True:
             # Retrieve the current context
-            current_context = await self.context_manager.retrieve()
+            current_context = await self._context_manager.retrieve()
             # Get the tools
-            tools = await self.tool_manager.get_tools()
+            tools = await self._tool_manager.get_tools()
             # Notify status
-            await self.message_bus.publish(
+            await self._message_bus.publish(
                 VoiceProcessingEngineStatusEvent(
-                    status="calling LLM", session_id=self.session_id
+                    status="calling LLM", session_id=self._session_id
                 )
             )
             # Generate the response
-            response: OpenAIResponse = await self.llm_manager.generate(
+            response: LLMResponse = await self._llm_manager.generate(
                 messages=current_context, tools=tools, tool_choice="auto"
             )
             assert isinstance(response, OpenAIResponse), (
@@ -155,14 +159,14 @@ class VoiceProcessingEngine(Engine):
             )
 
             # Store the response message
-            await self.context_manager.store_assistant_message(response_message)
+            await self._context_manager.store_assistant_message(response_message)
             # If there are no tool calls, break the loop and return the content
             if not response_message.tool_calls:
                 final_content = response_message.content or ""
                 # Notify status complete
-                await self.message_bus.publish(
+                await self._message_bus.publish(
                     VoiceProcessingEngineStatusEvent(
-                        status="finished", session_id=self.session_id
+                        status="finished", session_id=self._session_id
                     )
                 )
                 return final_content
@@ -176,9 +180,9 @@ class VoiceProcessingEngine(Engine):
                 )
                 try:
                     # Execute the tool
-                    await self.message_bus.publish(
+                    await self._message_bus.publish(
                         VoiceProcessingEngineStatusEvent(
-                            status="executing tool", session_id=self.session_id
+                            status="executing tool", session_id=self._session_id
                         )
                     )
 
@@ -189,7 +193,7 @@ class VoiceProcessingEngine(Engine):
                         tool_call_obj.arguments = json.dumps(args)
                         tool_call_obj.name = "merge_speakers_engine"
 
-                    result = await self.tool_manager.execute_tool_call(tool_call_obj)
+                    result = await self._tool_manager.execute_tool_call(tool_call_obj)
 
                     # Convert result to string if needed for history
                     if isinstance(result, dict):
@@ -197,17 +201,17 @@ class VoiceProcessingEngine(Engine):
                     else:
                         result_str = str(result)
                     # Store tool execution result in history
-                    self.context_manager.store_tool_call_result(
+                    self._context_manager.store_tool_call_result(
                         tool_call_id=tool_call_obj.id,
                         name=tool_call_obj.name,
                         content=result_str,
                     )
                     # Publish tool execution event
-                    await self.message_bus.publish(
+                    await self._message_bus.publish(
                         VoiceProcessingEngineToolResultEvent(
                             tool_name=tool_call_obj.name,
                             result=result_str,
-                            session_id=self.session_id,
+                            session_id=self._session_id,
                         )
                     )
 
@@ -215,7 +219,7 @@ class VoiceProcessingEngine(Engine):
                     error_msg = f"Error executing tool {tool_call_obj.name}: {str(e)}"
                     print(error_msg)  # Debug print
                     # Store error result in history
-                    self.context_manager.store_tool_call_result(
+                    self._context_manager.store_tool_call_result(
                         tool_call_id=tool_call_obj.id,
                         name=tool_call_obj.name,
                         content=error_msg,
@@ -227,15 +231,13 @@ class VoiceProcessingEngine(Engine):
         Args:
             function: The function to register as a tool
         """
-        await self.tool_manager.register_tool(function)
+        await self._tool_manager.register_tool(function)
 
 
 async def main():
     from llmgine.ui.cli.voice_processing_engine_cli import VoiceProcessingEngineCLI
     from llmgine.ui.cli.components import EngineResultComponent, ToolComponent
     from llmgine.bootstrap import ApplicationConfig, ApplicationBootstrap
-    from llmgine.llm.models.openai_models import Gpt41Mini
-    from llmgine.llm.providers.providers import Providers
 
     config = ApplicationConfig(enable_console_handler=False)
     bootstrap = ApplicationBootstrap(config)
@@ -243,13 +245,12 @@ async def main():
 
     # Initialize the engine
     engine = VoiceProcessingEngine(
-        model=Gpt41Mini(Providers.OPENAI),
         system_prompt=SYSTEM_PROMPT,
-        session_id=SessionID("test"),
+        session_id=SessionID("test")
     )
 
     # Register cli components
-    cli = VoiceProcessingEngineCLI("voice processing engine")
+    cli = VoiceProcessingEngineCLI(SessionID("test"))
     cli.register_engine(engine)
     cli.register_engine_command(VoiceProcessingEngineCommand, engine.handle_command)
     cli.register_engine_result_component(EngineResultComponent)
