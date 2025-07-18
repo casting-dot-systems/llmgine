@@ -4,9 +4,7 @@ import asyncio
 import os
 from pathlib import Path
 
-from llmgine.bus.bus import MessageBus
-from llmgine.bus.session import BusSession
-from notion_framework import NotionFramework
+from notion_framework.framework import NotionFramework
 from dotenv import load_dotenv
 
 load_dotenv(override=True)
@@ -29,72 +27,68 @@ async def main():
         "55909df8-1f56-40c4-9327-bab99b4f97f5",
     ]
 
-    # Create LLMgine message bus and session
-    message_bus = MessageBus()
-    await message_bus.start()
+    # Initialize Notion Framework
+    framework = NotionFramework(notion_token)
 
     try:
-        async with message_bus.create_session() as session:
-            # Initialize Notion Framework
-            framework = NotionFramework(session, notion_token)
+        print("🔍 Analyzing Notion workspace...")
 
-            try:
-                print("🔍 Analyzing Notion workspace...")
+        # Analyze workspace
+        workspace = await framework.analyze_workspace(database_ids)
 
-                # Analyze workspace
-                workspace = await framework.analyze_workspace(database_ids)
+        print(f"✅ Found {len(workspace.databases)} databases:")
+        for db in workspace.databases.values():
+            print(f"  • {db.title} ({len(db.properties)} properties)")
 
-                print(f"✅ Found {workspace.database_count} databases:")
-                for db in workspace.databases.values():
-                    print(f"  • {db.title} ({len(db.properties)} properties)")
+        print(f"🔗 Discovered {len(workspace.relationships)} relationships")
 
-                print(f"🔗 Discovered {workspace.relationship_count} relationships")
+        # Generate code
+        print("\n🛠️  Generating code...")
+        generated_files = await framework.generate_code(Path("./generated"))
 
-                # Generate code
-                print("\n🛠️  Generating code...")
-                generated_files = await framework.generate_code(Path("./generated"))
+        print(f"✅ Generated {len(generated_files['databases'])} database classes")
+        print(
+            f"✅ Generated {len(generated_files['crud_functions'])} CRUD function files"
+        )
 
-                print(
-                    f"✅ Generated {len(generated_files['databases'])} database classes"
-                )
-                print(f"✅ Generated {len(generated_files['tools'])} tool files")
+        # Show some example usage
+        print("\n📖 Example usage:")
+        print("```python")
+        print("from notion_framework.client.client import NotionClient")
+        print(
+            "from generated.crud.your_database import create_your_database, read_your_database"
+        )
+        print("")
+        print("# Initialize client")
+        print("client = NotionClient(notion_token)")
+        print("")
+        print("# Create a new row")
+        print(
+            "page_id = await create_your_database(client, title='New Item', status='In Progress')"
+        )
+        print("")
+        print("# Read the row")
+        print("data = await read_your_database(client, page_id)")
+        print("print(data)")
+        print("```")
 
-                # Load and register tools (if code was generated)
-                if generated_files["tools"]:
-                    print("\n📦 Loading and registering tools...")
-                    tools = await framework.load_and_register_tools(
-                        "./generated/tools/registry.py"
-                    )
-                    print(f"✅ Registered {len(tools)} tools")
+        # Show workspace summary
+        print(f"\n📊 Workspace Summary:")
+        print(f"  Databases: {len(workspace.databases)}")
+        print(f"  Relationships: {len(workspace.relationships)}")
+        total_properties = sum(len(db.properties) for db in workspace.databases.values())
+        print(f"  Total Properties: {total_properties}")
 
-                    # Show available tools
-                    print("\n🔧 Available tools:")
-                    for tool in tools[:10]:  # Show first 10 tools
-                        print(f"  • {tool.name}: {tool.description}")
+    except Exception as e:
+        print(f"❌ Error: {e}")
+        import traceback
 
-                    if len(tools) > 10:
-                        print(f"  ... and {len(tools) - 10} more")
-
-                # Get workspace info
-                workspace_info = framework.get_workspace_info()
-                if workspace_info:
-                    print(f"\n📊 Workspace Summary:")
-                    print(f"  Databases: {workspace_info['database_count']}")
-                    print(f"  Relationships: {workspace_info['relationship_count']}")
-                    print(
-                        f"  Total Properties: {sum(db['property_count'] for db in workspace_info['databases'])}"
-                    )
-
-            except Exception as e:
-                print(f"❌ Error: {e}")
-
-            finally:
-                # Clean up
-                await framework.close()
-                print("\n🏁 Done!")
+        traceback.print_exc()
 
     finally:
-        await message_bus.stop()
+        # Clean up
+        await framework.close()
+        print("\n🏁 Done!")
 
 
 if __name__ == "__main__":

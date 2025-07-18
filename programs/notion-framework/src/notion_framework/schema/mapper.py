@@ -1,7 +1,7 @@
 """Type mapping between Notion properties and Python types."""
 
 import logging
-from typing import Any, Dict, List, Optional, Type, Union
+from typing import List, Optional, Type
 
 from ..types.database import DatabaseSchema, PropertyDefinition
 from ..types.properties import (
@@ -25,8 +25,8 @@ from ..types.properties import (
     NotionStatus,
     NotionText,
     NotionTitle,
-    NotionURL,
     NotionUniqueID,
+    NotionURL,
 )
 
 logger = logging.getLogger(__name__)
@@ -63,7 +63,7 @@ class TypeMapper:
     # Python type annotations for properties
     PYTHON_TYPE_MAP = {
         "title": "str",
-        "rich_text": "str", 
+        "rich_text": "str",
         "number": "Union[int, float, None]",
         "select": "Optional[str]",
         "multi_select": "List[str]",
@@ -72,14 +72,14 @@ class TypeMapper:
         "files": "List[str]",   # File URLs/names
         "checkbox": "bool",
         "url": "Optional[str]",
-        "email": "Optional[str]", 
+        "email": "Optional[str]",
         "phone_number": "Optional[str]",
         "formula": "Any",  # Formula result type varies
         "relation": "List[str]",  # Page IDs
         "rollup": "Any",   # Rollup result type varies
         "created_time": "datetime",
         "created_by": "str",  # User ID
-        "last_edited_time": "datetime", 
+        "last_edited_time": "datetime",
         "last_edited_by": "str",  # User ID
         "status": "Optional[str]",
         "unique_id": "str",
@@ -117,7 +117,7 @@ class TypeMapper:
         # Map to basic JSON schema types
         type_map = {
             "title": "string",
-            "rich_text": "string", 
+            "rich_text": "string",
             "number": "number",
             "select": "string",
             "multi_select": "array",
@@ -126,14 +126,14 @@ class TypeMapper:
             "files": "array",
             "checkbox": "boolean",
             "url": "string",
-            "email": "string", 
+            "email": "string",
             "phone_number": "string",
             "formula": "string",
             "relation": "array",
             "rollup": "string",
             "created_time": "string",
             "created_by": "string",
-            "last_edited_time": "string", 
+            "last_edited_time": "string",
             "last_edited_by": "string",
             "status": "string",
             "unique_id": "string",
@@ -172,7 +172,7 @@ class TypeMapper:
         
         # Check if we need Literal
         needs_literal = any(
-            prop.type in ["select", "multi_select"] and 
+            prop.type in ["select", "multi_select"] and
             (prop.select_options or prop.multi_select_options)
             for prop in schema.properties.values()
         )
@@ -261,20 +261,12 @@ class TypeMapper:
         # Generate conversion logic based on property type
         if prop_def.type in ["title", "rich_text"]:
             method_lines.extend([
-                f"        if isinstance(value, str):",
+                "        if isinstance(value, str):",
                 f"            self._{normalized_name}_notion = {python_class.__name__}(value)",
-                f"        else:",
+                "        else:",
                 f"            self._{normalized_name}_notion = value"
             ])
-        elif prop_def.type == "number":
-            method_lines.extend([
-                f"        self._{normalized_name}_notion = {python_class.__name__}(value)"
-            ])
-        elif prop_def.type in ["select", "status"]:
-            method_lines.extend([
-                f"        self._{normalized_name}_notion = {python_class.__name__}(value)"
-            ])
-        elif prop_def.type == "checkbox":
+        elif prop_def.type == "number" or prop_def.type in ["select", "status"] or prop_def.type == "checkbox":
             method_lines.extend([
                 f"        self._{normalized_name}_notion = {python_class.__name__}(value)"
             ])
@@ -291,7 +283,7 @@ class TypeMapper:
             f"    def get_{normalized_name}(self) -> {self.get_python_type_annotation(prop_def)}:",
             f'        """Get {prop_name} property value."""',
             f"        if self._{normalized_name}_notion is None:",
-            f"            return None",
+            "            return None",
         ])
         
         # Generate getter logic based on property type

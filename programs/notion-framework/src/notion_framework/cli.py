@@ -1,4 +1,4 @@
-"""Fixed command-line interface for the Notion Framework."""
+"""Command-line interface for the Notion Framework."""
 
 import asyncio
 import logging
@@ -9,7 +9,6 @@ from typing import List, Optional
 
 import click
 from rich.console import Console
-from rich.panel import Panel
 from rich.table import Table
 
 # Setup logging
@@ -58,7 +57,7 @@ def parse_database_urls(urls: List[str]) -> List[str]:
 
 @click.group()
 def cli():
-    """Notion Framework CLI - Generate typed tools for Notion databases."""
+    """Notion Framework CLI - Generate typed CRUD functions for Notion databases."""
     pass
 
 
@@ -67,14 +66,13 @@ def cli():
 @click.option("--output", "-o", default="./generated", help="Output directory")
 @click.argument("databases", nargs=-1, required=True)
 def generate(token: Optional[str], output: str, databases: tuple):
-    """Generate typed database classes and tools from Notion databases.
+    """Generate typed database classes and CRUD functions from Notion databases.
     
     DATABASES: List of database URLs or IDs
     """
     
     async def _generate():
-        from llmgine.bus.bus import MessageBus
-        from .integration.framework import NotionFramework
+        from .framework import NotionFramework
         
         # Get token
         notion_token = token or get_notion_token()
@@ -88,40 +86,72 @@ def generate(token: Optional[str], output: str, databases: tuple):
         
         console.print(f"[green]Analyzing {len(database_ids)} databases...[/green]")
         
-        # Initialize message bus and session
-        message_bus = MessageBus()
-        await message_bus.start()
+        # Initialize framework
+        framework = NotionFramework(notion_token)
         
         try:
-            async with message_bus.create_session() as session:
-                # Initialize framework
-                framework = NotionFramework(session, notion_token)
-                
-                try:
-                    # Analyze workspace
-                    workspace = await framework.analyze_workspace(database_ids)
-                    
-                    # Display workspace info
-                    _display_workspace_info(workspace)
-                    
-                    # Generate code
-                    output_path = Path(output)
-                    generated_files = await framework.generate_code(output_path)
-                    
-                    # Display results
-                    _display_generation_results(generated_files, output_path)
-                    
-                except Exception as e:
-                    console.print(f"[red]Generation failed: {e}[/red]")
-                    logger.exception("Generation failed")
-                    sys.exit(1)
-                finally:
-                    await framework.close()
-                    
+            # Analyze workspace
+            workspace = await framework.analyze_workspace(database_ids)
+            
+            # Display workspace info
+            _display_workspace_info(workspace)
+            
+            # Generate code
+            output_path = Path(output)
+            generated_files = await framework.generate_code(output_path)
+            
+            # Display results
+            _display_generation_results(generated_files, output_path)
+            
+        except Exception as e:
+            console.print(f"[red]Generation failed: {e}[/red]")
+            logger.exception("Generation failed")
+            sys.exit(1)
         finally:
-            await message_bus.stop()
+            await framework.close()
     
     asyncio.run(_generate())
+
+
+@cli.command()
+@click.option("--token", "-t", help="Notion API token")
+@click.argument("databases", nargs=-1, required=True)
+def analyze(token: Optional[str], databases: tuple):
+    """Analyze Notion databases and show their structure."""
+    
+    async def _analyze():
+        from .framework import NotionFramework
+        
+        # Get token
+        notion_token = token or get_notion_token()
+        
+        # Parse database IDs
+        database_ids = parse_database_urls(list(databases))
+        
+        if not database_ids:
+            console.print("[red]No valid database IDs provided[/red]")
+            sys.exit(1)
+        
+        console.print(f"[green]Analyzing {len(database_ids)} databases...[/green]")
+        
+        # Initialize framework
+        framework = NotionFramework(notion_token)
+        
+        try:
+            # Analyze workspace
+            workspace = await framework.analyze_workspace(database_ids)
+            
+            # Display workspace info
+            _display_workspace_info(workspace)
+            
+        except Exception as e:
+            console.print(f"[red]Analysis failed: {e}[/red]")
+            logger.exception("Analysis failed")
+            sys.exit(1)
+        finally:
+            await framework.close()
+    
+    asyncio.run(_analyze())
 
 
 def _display_workspace_info(workspace):
@@ -155,19 +185,19 @@ def _display_workspace_info(workspace):
 
 def _display_generation_results(generated_files, output_path):
     """Display code generation results."""
-    console.print(f"\n[bold green]Code Generation Complete![/bold green]")
+    console.print("\n[bold green]Code Generation Complete![/bold green]")
     console.print(f"Output directory: {output_path}")
     
     if generated_files.get("databases"):
         console.print(f"Generated {len(generated_files['databases'])} database classes")
     
-    if generated_files.get("tools"):
-        console.print(f"Generated {len(generated_files['tools'])} tool files")
+    if generated_files.get("crud_functions"):
+        console.print(f"Generated {len(generated_files['crud_functions'])} CRUD function files")
     
     console.print("\n[bold]Next steps:[/bold]")
     console.print("1. Review the generated code")
-    console.print("2. Import and use the generated tools in your LLMgine application")
-    console.print("3. Customize the generated tools as needed")
+    console.print("2. Import and use the generated functions in your Python application")
+    console.print("3. Customize the generated code as needed")
 
 
 if __name__ == "__main__":

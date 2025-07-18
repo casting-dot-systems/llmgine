@@ -4,7 +4,7 @@ import logging
 from pathlib import Path
 from typing import Any, Dict, Optional
 
-from jinja2 import Environment, FileSystemLoader, Template
+from jinja2 import Environment, FileSystemLoader
 
 from ..client.exceptions import CodeGenerationError
 
@@ -32,6 +32,7 @@ class TemplateEngine:
         self.env.filters.update({
             'normalize_name': self._normalize_name,
             'normalize_class_name': self._normalize_class_name,
+            'normalize_enum_value': self._normalize_enum_value,
             'python_type': self._get_python_type,
             'json_schema_type': self._get_json_schema_type,
             'notion_type': self._get_notion_type,
@@ -123,6 +124,17 @@ class TemplateEngine:
             class_name = f"Database{class_name}"
         
         return class_name or "UnnamedDatabase"
+    
+    def _normalize_enum_value(self, name: str) -> str:
+        """Normalize a name to a valid Python enum value."""
+        import re
+        # Convert to uppercase and replace invalid characters
+        normalized = name.upper().replace(' ', '_').replace('-', '_')
+        normalized = re.sub(r'[^A-Z0-9_]', '_', normalized)
+        # Ensure it starts with a letter
+        if normalized and normalized[0].isdigit():
+            normalized = f'_{normalized}'
+        return normalized or 'UNNAMED'
     
     def _to_snake_case(self, name: str) -> str:
         """Convert to snake_case."""

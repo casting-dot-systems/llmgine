@@ -1,7 +1,7 @@
 """Typed Notion API client wrapper."""
 
 import logging
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Union
 
 from notion_client import AsyncClient, Client
 from notion_client.errors import APIResponseError, RequestTimeoutError
@@ -30,8 +30,12 @@ class NotionClientConfig(BaseModel):
 class NotionClient:
     """Typed wrapper around the Notion API client."""
     
-    def __init__(self, config: NotionClientConfig) -> None:
-        self.config = config
+    def __init__(self, config: Union[NotionClientConfig, str]) -> None:
+        if isinstance(config, str):
+            # If a string is passed, treat it as the auth token
+            self.config = NotionClientConfig(auth=config)
+        else:
+            self.config = config
         self._sync_client: Optional[Client] = None
         self._async_client: Optional[AsyncClient] = None
         

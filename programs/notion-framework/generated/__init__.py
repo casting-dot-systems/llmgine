@@ -1,1 +1,1 @@
-"""Generated Notion framework code."""
+"""Generated Notion database code."""

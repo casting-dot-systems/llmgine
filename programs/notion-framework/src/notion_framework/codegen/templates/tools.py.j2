@@ -1,441 +1,373 @@
-"""Generated tools for {{ database.title }} database."""
+"""Generated CRUD functions for {{ database.title }} database."""
 
 from typing import Any, Dict, List, Optional, Union
 from datetime import datetime
 
-from llmgine.llm.tools import Tool, Parameter
 from notion_framework.client.client import NotionClient
 from notion_framework.types.filters import FilterBuilder
 from notion_framework.types.sorts import SortBuilder
 
-from ..databases.{{ database.title | normalize_class_name | snake_case }} import {{ database.title | normalize_class_name }}
+from ..types import (
+    {{ database.title | normalize_class_name }}ID,
+{% for prop_name, prop in database.properties.items() %}
+{% if prop.type == 'select' and prop.select_options %}
+    {{ database.title | normalize_class_name }}_{{ prop_name | normalize_class_name }},
+{% endif %}
+{% endfor %}
+)
 
 
-# CRUD Tools
+# CRUD Functions for {{ database.title }}
 
 async def create_{{ database.title | normalize_name }}(
     client: NotionClient,
+    data: Dict[str, Any]
+) -> {{ database.title | normalize_class_name }}ID:
+    """Create a new {{ database.title }} entry.
+    
+    Args:
+        client: Notion client instance
+        data: Dictionary containing the properties to set
+        
+    Returns:
+        ID of the created page
+    """
+    properties = {}
+    
+    # Convert data to Notion format
 {% for prop_name, prop in database.properties.items() %}
-{% if prop.is_required and prop.is_editable %}
-    {{ prop_name | normalize_name }}: {{ prop.type | python_type(get_property_options(prop)) }},
+{% if prop.is_editable %}
+    if "{{ prop_name | normalize_name }}" in data:
+        value = data["{{ prop_name | normalize_name }}"]
+        # Convert based on property type
+{% if prop.type == 'title' %}
+        if isinstance(value, str):
+            properties["{{ prop_name }}"] = {"title": [{"text": {"content": value}}]}
+{% elif prop.type == 'rich_text' %}
+        if isinstance(value, str):
+            properties["{{ prop_name }}"] = {"rich_text": [{"text": {"content": value}}]}
+{% elif prop.type == 'select' %}
+        if isinstance(value, (str, {{ database.title | normalize_class_name }}_{{ prop_name | normalize_class_name }})):
+            properties["{{ prop_name }}"] = {"select": {"name": str(value)}}
+{% elif prop.type == 'checkbox' %}
+        if isinstance(value, bool):
+            properties["{{ prop_name }}"] = {"checkbox": value}
+{% elif prop.type == 'number' %}
+        if isinstance(value, (int, float)):
+            properties["{{ prop_name }}"] = {"number": value}
+{% elif prop.type == 'date' %}
+        if isinstance(value, str):
+            properties["{{ prop_name }}"] = {"date": {"start": value}}
+{% elif prop.type == 'relation' %}
+        if isinstance(value, list):
+            properties["{{ prop_name }}"] = {"relation": [{"id": str(page_id)} for page_id in value]}
+{% else %}
+        # Generic handling for other types
+        properties["{{ prop_name }}"] = {
+            "{{ prop.type }}": value
+        }
+{% endif %}
 {% endif %}
 {% endfor %}
+    
+    # Create the page
+    response = await client.create_page(
+        database_id="{{ database.id }}",
+        properties=properties
+    )
+    
+    return {{ database.title | normalize_class_name }}ID(response["id"])
+
+
+async def read_{{ database.title | normalize_name }}(
+    client: NotionClient,
+    page_id: {{ database.title | normalize_class_name }}ID
+) -> Dict[str, Any]:
+    """Read a {{ database.title }} entry by ID.
+    
+    Args:
+        client: Notion client instance
+        page_id: ID of the page to read
+        
+    Returns:
+        Dictionary containing the page properties
+    """
+    response = await client.get_page(str(page_id))
+    
+    # Extract properties
+    data = {}
+    properties = response.get("properties", {})
+    
 {% for prop_name, prop in database.properties.items() %}
-{% if not prop.is_required and prop.is_editable %}
-    {{ prop_name | normalize_name }}: Optional[{{ prop.type | python_type(get_property_options(prop)) }}] = None,
+    # Extract {{ prop_name }}
+    if "{{ prop_name }}" in properties:
+        prop_data = properties["{{ prop_name }}"]
+{% if prop.type == 'title' %}
+        if prop_data.get("title"):
+            data["{{ prop_name | normalize_name }}"] = "".join(
+                text.get("plain_text", "") for text in prop_data["title"]
+            )
+{% elif prop.type == 'rich_text' %}
+        if prop_data.get("rich_text"):
+            data["{{ prop_name | normalize_name }}"] = "".join(
+                text.get("plain_text", "") for text in prop_data["rich_text"]
+            )
+{% elif prop.type == 'select' %}
+        if prop_data.get("select"):
+            data["{{ prop_name | normalize_name }}"] = {{ database.title | normalize_class_name }}_{{ prop_name | normalize_class_name }}(
+                prop_data["select"]["name"]
+            )
+{% elif prop.type == 'checkbox' %}
+        data["{{ prop_name | normalize_name }}"] = prop_data.get("checkbox", False)
+{% elif prop.type == 'number' %}
+        data["{{ prop_name | normalize_name }}"] = prop_data.get("number")
+{% elif prop.type == 'date' %}
+        if prop_data.get("date") and prop_data["date"].get("start"):
+            data["{{ prop_name | normalize_name }}"] = prop_data["date"]["start"]
+{% elif prop.type == 'relation' %}
+        if prop_data.get("relation"):
+            data["{{ prop_name | normalize_name }}"] = [
+                rel["id"] for rel in prop_data["relation"]
+            ]
+{% else %}
+        data["{{ prop_name | normalize_name }}"] = prop_data.get("{{ prop.type }}")
 {% endif %}
 {% endfor %}
-) -> str:
-    """Create a new {{ database.title }}."""
     
-    instance = {{ database.title | normalize_class_name }}()
-    instance.set_client(client)
-    
-    # Set required properties
-{% for prop_name, prop in database.properties.items() %}
-{% if prop.is_required and prop.is_editable %}
-    instance.set_{{ prop_name | normalize_name }}({{ prop_name | normalize_name }})
-{% endif %}
-{% endfor %}
-    
-    # Set optional properties
-{% for prop_name, prop in database.properties.items() %}
-{% if not prop.is_required and prop.is_editable %}
-    if {{ prop_name | normalize_name }} is not None:
-        instance.set_{{ prop_name | normalize_name }}({{ prop_name | normalize_name }})
-{% endif %}
-{% endfor %}
-    
-    page_id = await instance.create()
-    return f"Created {{ database.title }} with ID: {page_id}"
+    return data
 
 
 async def update_{{ database.title | normalize_name }}(
     client: NotionClient,
-    page_id: str,
+    page_id: {{ database.title | normalize_class_name }}ID,
+    data: Dict[str, Any]
+) -> {{ database.title | normalize_class_name }}ID:
+    """Update a {{ database.title }} entry.
+    
+    Args:
+        client: Notion client instance
+        page_id: ID of the page to update
+        data: Dictionary containing the properties to update
+        
+    Returns:
+        ID of the updated page
+    """
+    properties = {}
+    
+    # Convert data to Notion format (same logic as create)
 {% for prop_name, prop in database.properties.items() %}
 {% if prop.is_editable %}
-    {{ prop_name | normalize_name }}: Optional[{{ prop.type | python_type(get_property_options(prop)) }}] = None,
+    if "{{ prop_name | normalize_name }}" in data:
+        value = data["{{ prop_name | normalize_name }}"]
+        # Convert based on property type
+{% if prop.type == 'title' %}
+        if isinstance(value, str):
+            properties["{{ prop_name }}"] = {"title": [{"text": {"content": value}}]}
+{% elif prop.type == 'rich_text' %}
+        if isinstance(value, str):
+            properties["{{ prop_name }}"] = {"rich_text": [{"text": {"content": value}}]}
+{% elif prop.type == 'select' %}
+        if isinstance(value, (str, {{ database.title | normalize_class_name }}_{{ prop_name | normalize_class_name }})):
+            properties["{{ prop_name }}"] = {"select": {"name": str(value)}}
+{% elif prop.type == 'checkbox' %}
+        if isinstance(value, bool):
+            properties["{{ prop_name }}"] = {"checkbox": value}
+{% elif prop.type == 'number' %}
+        if isinstance(value, (int, float)):
+            properties["{{ prop_name }}"] = {"number": value}
+{% elif prop.type == 'date' %}
+        if isinstance(value, str):
+            properties["{{ prop_name }}"] = {"date": {"start": value}}
+{% elif prop.type == 'relation' %}
+        if isinstance(value, list):
+            properties["{{ prop_name }}"] = {"relation": [{"id": str(page_id)} for page_id in value]}
+{% else %}
+        # Generic handling for other types
+        properties["{{ prop_name }}"] = {
+            "{{ prop.type }}": value
+        }
+{% endif %}
 {% endif %}
 {% endfor %}
-) -> str:
-    """Update an existing {{ database.title }}."""
     
-    # Get current page data
-    instance = await {{ database.title | normalize_class_name }}.get(client, page_id)
+    # Update the page
+    await client.update_page(str(page_id), properties=properties)
     
-    # Update properties that were provided
-{% for prop_name, prop in database.properties.items() %}
-{% if prop.is_editable %}
-    if {{ prop_name | normalize_name }} is not None:
-        instance.set_{{ prop_name | normalize_name }}({{ prop_name | normalize_name }})
-{% endif %}
-{% endfor %}
-    
-    await instance.update(page_id)
-    return f"Updated {{ database.title }} {page_id}"
+    return page_id
 
 
-async def get_{{ database.title | normalize_name }}(
+async def delete_{{ database.title | normalize_name }}(
     client: NotionClient,
-    page_id: str
-) -> str:
-    """Get a {{ database.title }} by ID."""
+    page_id: {{ database.title | normalize_class_name }}ID
+) -> {{ database.title | normalize_class_name }}ID:
+    """Delete (archive) a {{ database.title }} entry.
     
-    instance = await {{ database.title | normalize_class_name }}.get(client, page_id)
-    
-    # Format output
-    details = []
-{% for prop_name, prop in database.properties.items() %}
-    if instance.{{ prop_name | normalize_name }} is not None:
-        details.append(f"{{ prop.name }}: {instance.{{ prop_name | normalize_name }}}")
-{% endfor %}
-    
-    return f"{{ database.title }} {page_id}:\n" + "\n".join(details)
+    Args:
+        client: Notion client instance
+        page_id: ID of the page to delete
+        
+    Returns:
+        ID of the deleted page
+    """
+    await client.update_page(str(page_id), archived=True)
+    return page_id
 
 
 async def list_{{ database.title | normalize_name }}s(
     client: NotionClient,
-    limit: Optional[int] = 10,
-{% for prop_name, prop in database.properties.items() %}
-{% if prop.type == 'select' and get_property_options(prop) %}
-    filter_by_{{ prop_name | normalize_name }}: Optional[str] = None,
-{% elif prop.type == 'checkbox' %}
-    filter_by_{{ prop_name | normalize_name }}: Optional[bool] = None,
-{% elif prop.type in ['title', 'rich_text'] %}
-    filter_by_{{ prop_name | normalize_name }}_contains: Optional[str] = None,
-{% endif %}
-{% endfor %}
-) -> str:
-    """List {{ database.title }}s with optional filtering."""
+    limit: int = 100,
+    filter_data: Optional[Dict[str, Any]] = None
+) -> List[Dict[str, Any]]:
+    """List {{ database.title }} entries.
     
-    # Build filters
-    filters = []
-{% for prop_name, prop in database.properties.items() %}
-{% if prop.type == 'select' and get_property_options(prop) %}
-    if filter_by_{{ prop_name | normalize_name }} is not None:
-        filters.append({{ database.title | normalize_class_name }}.filter_by_{{ prop_name | normalize_name }}(filter_by_{{ prop_name | normalize_name }}))
-{% elif prop.type == 'checkbox' %}
-    if filter_by_{{ prop_name | normalize_name }} is not None:
-        filters.append({{ database.title | normalize_class_name }}.filter_by_{{ prop_name | normalize_name }}(filter_by_{{ prop_name | normalize_name }}))
-{% elif prop.type in ['title', 'rich_text'] %}
-    if filter_by_{{ prop_name | normalize_name }}_contains is not None:
-        filters.append({{ database.title | normalize_class_name }}.filter_by_{{ prop_name | normalize_name }}_contains(filter_by_{{ prop_name | normalize_name }}_contains))
-{% endif %}
-{% endfor %}
+    Args:
+        client: Notion client instance
+        limit: Maximum number of entries to return
+        filter_data: Optional filter criteria
+        
+    Returns:
+        List of dictionaries containing the page properties
+    """
+    # Build query
+    query_data = {
+        "page_size": limit
+    }
     
-    # Combine filters
-    filter_condition = None
-    if filters:
-        if len(filters) == 1:
-            filter_condition = filters[0]
-        else:
-            filter_condition = FilterBuilder().and_(*filters)
+    if filter_data:
+        query_data["filter"] = filter_data
     
-    # Sort by last edited time (newest first)
-    sorts = [SortBuilder().last_edited_time().desc()]
+    # Query the database
+    response = await client.query_database("{{ database.id }}", **query_data)
     
-    instances = await {{ database.title | normalize_class_name }}.list(
-        client=client,
-        filter_condition=filter_condition,
-        sorts=sorts,
-        limit=limit
-    )
-    
-    if not instances:
-        return "No {{ database.title }}s found"
-    
-    # Format results
+    # Extract data from each page
     results = []
-    for instance in instances:
+    for page in response.get("results", []):
+        page_data = {"id": {{ database.title | normalize_class_name }}ID(page["id"])}
+        properties = page.get("properties", {})
+        
 {% for prop_name, prop in database.properties.items() %}
+        # Extract {{ prop_name }}
+        if "{{ prop_name }}" in properties:
+            prop_data = properties["{{ prop_name }}"]
 {% if prop.type == 'title' %}
-        title = instance.{{ prop_name | normalize_name }} or "Untitled"
-        break
-{% endif %}
+            if prop_data.get("title"):
+                page_data["{{ prop_name | normalize_name }}"] = "".join(
+                    text.get("plain_text", "") for text in prop_data["title"]
+                )
+{% elif prop.type == 'rich_text' %}
+            if prop_data.get("rich_text"):
+                page_data["{{ prop_name | normalize_name }}"] = "".join(
+                    text.get("plain_text", "") for text in prop_data["rich_text"]
+                )
+{% elif prop.type == 'select' %}
+            if prop_data.get("select"):
+                page_data["{{ prop_name | normalize_name }}"] = {{ database.title | normalize_class_name }}_{{ prop_name | normalize_class_name }}(
+                    prop_data["select"]["name"]
+                )
+{% elif prop.type == 'checkbox' %}
+            page_data["{{ prop_name | normalize_name }}"] = prop_data.get("checkbox", False)
+{% elif prop.type == 'number' %}
+            page_data["{{ prop_name | normalize_name }}"] = prop_data.get("number")
+{% elif prop.type == 'date' %}
+            if prop_data.get("date") and prop_data["date"].get("start"):
+                page_data["{{ prop_name | normalize_name }}"] = prop_data["date"]["start"]
+{% elif prop.type == 'relation' %}
+            if prop_data.get("relation"):
+                page_data["{{ prop_name | normalize_name }}"] = [
+                    rel["id"] for rel in prop_data["relation"]
+                ]
 {% else %}
-        title = "{{ database.title }}"
-{% endfor %}
-{% for prop_name, prop in database.properties.items() %}
-{% if prop.type == 'title' %}
-        results.append(f"• {title}")
+            page_data["{{ prop_name | normalize_name }}"] = prop_data.get("{{ prop.type }}")
 {% endif %}
 {% endfor %}
+        
+        results.append(page_data)
     
-    return f"Found {len(instances)} {{ database.title }}s:\n" + "\n".join(results)
+    return results
 
 
-# Property-specific tools
+# Test Functions
 
-{% for prop_name, prop in database.properties.items() %}
-{% if prop.type == 'select' and prop.is_editable and get_property_options(prop) %}
-async def set_{{ database.title | normalize_name }}_{{ prop_name | normalize_name }}(
-    client: NotionClient,
-    page_id: str,
-    {{ prop_name | normalize_name }}: str
-) -> str:
-    """Set {{ prop.name }} for a {{ database.title }}."""
+async def test_{{ database.title | normalize_name }}_crud():
+    """Test CRUD operations for {{ database.title }}."""
+    import os
+    from notion_framework.client.client import NotionClient
     
-    # Validate the value
-    valid_options = [{% for opt in get_property_options(prop) %}"{{ opt.name }}"{% if not loop.last %}, {% endif %}{% endfor %}]
-    if {{ prop_name | normalize_name }} not in valid_options:
-        return f"Invalid {{ prop.name }}. Valid options: {', '.join(valid_options)}"
+    # Initialize client
+    token = os.getenv("NOTION_TOKEN")
+    if not token:
+        print("❌ NOTION_TOKEN environment variable is required for testing")
+        return
     
-    instance = await {{ database.title | normalize_class_name }}.get(client, page_id)
-    instance.set_{{ prop_name | normalize_name }}({{ prop_name | normalize_name }})
-    await instance.update(page_id)
+    client = NotionClient(token)
     
-    return f"Set {{ prop.name }} to '{{ '{' }}{{ prop_name | normalize_name }}{{ '}' }}' for {{ database.title }} {page_id}"
-
-
-{% endif %}
-{% if prop.type == 'checkbox' and prop.is_editable %}
-async def toggle_{{ database.title | normalize_name }}_{{ prop_name | normalize_name }}(
-    client: NotionClient,
-    page_id: str
-) -> str:
-    """Toggle {{ prop.name }} for a {{ database.title }}."""
-    
-    instance = await {{ database.title | normalize_class_name }}.get(client, page_id)
-    current_value = instance.get_{{ prop_name | normalize_name }}()
-    new_value = not current_value
-    
-    instance.set_{{ prop_name | normalize_name }}(new_value)
-    await instance.update(page_id)
-    
-    return f"Toggled {{ prop.name }} to {new_value} for {{ database.title }} {page_id}"
-
-
-{% endif %}
-{% if prop.type == 'relation' and prop.is_editable %}
-async def add_{{ database.title | normalize_name }}_{{ prop_name | normalize_name }}(
-    client: NotionClient,
-    page_id: str,
-    related_page_id: str
-) -> str:
-    """Add a relation to {{ prop.name }} for a {{ database.title }}."""
-    
-    instance = await {{ database.title | normalize_class_name }}.get(client, page_id)
-    current_relations = instance.get_{{ prop_name | normalize_name }}() or []
-    
-    if related_page_id not in current_relations:
-        current_relations.append(related_page_id)
-        instance.set_{{ prop_name | normalize_name }}(current_relations)
-        await instance.update(page_id)
-        return f"Added relation to {{ prop.name }} for {{ database.title }} {page_id}"
-    else:
-        return f"Relation already exists in {{ prop.name }} for {{ database.title }} {page_id}"
-
-
-async def remove_{{ database.title | normalize_name }}_{{ prop_name | normalize_name }}(
-    client: NotionClient,
-    page_id: str,
-    related_page_id: str
-) -> str:
-    """Remove a relation from {{ prop.name }} for a {{ database.title }}."""
-    
-    instance = await {{ database.title | normalize_class_name }}.get(client, page_id)
-    current_relations = instance.get_{{ prop_name | normalize_name }}() or []
-    
-    if related_page_id in current_relations:
-        current_relations.remove(related_page_id)
-        instance.set_{{ prop_name | normalize_name }}(current_relations)
-        await instance.update(page_id)
-        return f"Removed relation from {{ prop.name }} for {{ database.title }} {page_id}"
-    else:
-        return f"Relation not found in {{ prop.name }} for {{ database.title }} {page_id}"
-
-
-{% endif %}
-{% endfor %}
-
-# LLMgine Tool Definitions
-
-TOOLS = [
-    Tool(
-        name="create_{{ database.title | normalize_name }}",
-        description="Create a new {{ database.title }}",
-        parameters=[
+    try:
+        print("🧪 Testing {{ database.title }} CRUD operations...")
+        
+        # Test data
+        test_data = {
 {% for prop_name, prop in database.properties.items() %}
 {% if prop.is_required and prop.is_editable %}
-            Parameter(
-                name="{{ prop_name | normalize_name }}",
-                description="{{ prop.name }}",
-                type="{{ prop.type | json_schema_type }}",
-                required=True
-            ),
-{% endif %}
-{% endfor %}
-{% for prop_name, prop in database.properties.items() %}
-{% if not prop.is_required and prop.is_editable %}
-            Parameter(
-                name="{{ prop_name | normalize_name }}",
-                description="{{ prop.name }}",
-                type="{{ prop.type | json_schema_type }}",
-                required=False
-            ),
-{% endif %}
-{% endfor %}
-        ],
-        function=create_{{ database.title | normalize_name }},
-        is_async=True
-    ),
-    Tool(
-        name="update_{{ database.title | normalize_name }}",
-        description="Update an existing {{ database.title }}",
-        parameters=[
-            Parameter(
-                name="page_id",
-                description="ID of the page to update",
-                type="str",
-                required=True
-            ),
-{% for prop_name, prop in database.properties.items() %}
-{% if prop.is_editable %}
-            Parameter(
-                name="{{ prop_name | normalize_name }}",
-                description="{{ prop.name }}",
-                type="{{ prop.type | json_schema_type }}",
-                required=False
-            ),
-{% endif %}
-{% endfor %}
-        ],
-        function=update_{{ database.title | normalize_name }},
-        is_async=True
-    ),
-    Tool(
-        name="get_{{ database.title | normalize_name }}",
-        description="Get a {{ database.title }} by ID",
-        parameters=[
-            Parameter(
-                name="page_id",
-                description="ID of the page to retrieve",
-                type="str",
-                required=True
-            )
-        ],
-        function=get_{{ database.title | normalize_name }},
-        is_async=True
-    ),
-    Tool(
-        name="list_{{ database.title | normalize_name }}s",
-        description="List {{ database.title }}s with optional filtering",
-        parameters=[
-            Parameter(
-                name="limit",
-                description="Maximum number of results to return",
-                type="int",
-                required=False
-            ),
-{% for prop_name, prop in database.properties.items() %}
-{% if prop.type == 'select' and get_property_options(prop) %}
-            Parameter(
-                name="filter_by_{{ prop_name | normalize_name }}",
-                description="Filter by {{ prop.name }}",
-                type="str",
-                required=False
-            ),
+{% if prop.type == 'title' %}
+            "{{ prop_name | normalize_name }}": "Test {{ database.title }} Entry",
+{% elif prop.type == 'rich_text' %}
+            "{{ prop_name | normalize_name }}": "Test description",
+{% elif prop.type == 'select' %}
+            "{{ prop_name | normalize_name }}": {{ database.title | normalize_class_name }}_{{ prop_name | normalize_class_name }}.{{ prop.select_options[0].name | normalize_enum_value }},
 {% elif prop.type == 'checkbox' %}
-            Parameter(
-                name="filter_by_{{ prop_name | normalize_name }}",
-                description="Filter by {{ prop.name }}",
-                type="bool",
-                required=False
-            ),
-{% elif prop.type in ['title', 'rich_text'] %}
-            Parameter(
-                name="filter_by_{{ prop_name | normalize_name }}_contains",
-                description="Filter by {{ prop.name }} containing text",
-                type="str",
-                required=False
-            ),
+            "{{ prop_name | normalize_name }}": True,
+{% elif prop.type == 'number' %}
+            "{{ prop_name | normalize_name }}": 42,
+{% elif prop.type == 'date' %}
+            "{{ prop_name | normalize_name }}": "2024-01-01",
+{% endif %}
 {% endif %}
 {% endfor %}
-        ],
-        function=list_{{ database.title | normalize_name }}s,
-        is_async=True
-    ),
+        }
+        
+        # Test CREATE
+        print("  ✅ Testing CREATE...")
+        page_id = await create_{{ database.title | normalize_name }}(client, test_data)
+        print(f"     Created page: {page_id}")
+        
+        # Test READ
+        print("  ✅ Testing READ...")
+        data = await read_{{ database.title | normalize_name }}(client, page_id)
+        print(f"     Read data: {data}")
+        
+        # Test UPDATE
+        print("  ✅ Testing UPDATE...")
+        update_data = {
 {% for prop_name, prop in database.properties.items() %}
-{% if prop.type == 'select' and prop.is_editable and get_property_options(prop) %}
-    Tool(
-        name="set_{{ database.title | normalize_name }}_{{ prop_name | normalize_name }}",
-        description="Set {{ prop.name }} for a {{ database.title }}",
-        parameters=[
-            Parameter(
-                name="page_id",
-                description="ID of the page to update",
-                type="str",
-                required=True
-            ),
-            Parameter(
-                name="{{ prop_name | normalize_name }}",
-                description="{{ prop.name }} value",
-                type="str",
-                required=True
-            )
-        ],
-        function=set_{{ database.title | normalize_name }}_{{ prop_name | normalize_name }},
-        is_async=True
-    ),
-{% endif %}
-{% if prop.type == 'checkbox' and prop.is_editable %}
-    Tool(
-        name="toggle_{{ database.title | normalize_name }}_{{ prop_name | normalize_name }}",
-        description="Toggle {{ prop.name }} for a {{ database.title }}",
-        parameters=[
-            Parameter(
-                name="page_id",
-                description="ID of the page to update",
-                type="str",
-                required=True
-            )
-        ],
-        function=toggle_{{ database.title | normalize_name }}_{{ prop_name | normalize_name }},
-        is_async=True
-    ),
-{% endif %}
-{% if prop.type == 'relation' and prop.is_editable %}
-    Tool(
-        name="add_{{ database.title | normalize_name }}_{{ prop_name | normalize_name }}",
-        description="Add a relation to {{ prop.name }} for a {{ database.title }}",
-        parameters=[
-            Parameter(
-                name="page_id",
-                description="ID of the page to update",
-                type="str",
-                required=True
-            ),
-            Parameter(
-                name="related_page_id",
-                description="ID of the page to relate",
-                type="str",
-                required=True
-            )
-        ],
-        function=add_{{ database.title | normalize_name }}_{{ prop_name | normalize_name }},
-        is_async=True
-    ),
-    Tool(
-        name="remove_{{ database.title | normalize_name }}_{{ prop_name | normalize_name }}",
-        description="Remove a relation from {{ prop.name }} for a {{ database.title }}",
-        parameters=[
-            Parameter(
-                name="page_id",
-                description="ID of the page to update",
-                type="str",
-                required=True
-            ),
-            Parameter(
-                name="related_page_id",
-                description="ID of the page to unrelate",
-                type="str",
-                required=True
-            )
-        ],
-        function=remove_{{ database.title | normalize_name }}_{{ prop_name | normalize_name }},
-        is_async=True
-    ),
+{% if prop.is_editable and prop.type == 'title' %}
+            "{{ prop_name | normalize_name }}": "Updated Test Entry",
 {% endif %}
 {% endfor %}
-]
+        }
+        await update_{{ database.title | normalize_name }}(client, page_id, update_data)
+        print("     Updated page")
+        
+        # Test LIST
+        print("  ✅ Testing LIST...")
+        results = await list_{{ database.title | normalize_name }}s(client, limit=5)
+        print(f"     Found {len(results)} entries")
+        
+        # Test DELETE
+        print("  ✅ Testing DELETE...")
+        await delete_{{ database.title | normalize_name }}(client, page_id)
+        print("     Deleted page")
+        
+        print("✅ All tests passed!")
+        
+    except Exception as e:
+        print(f"❌ Test failed: {e}")
+        import traceback
+        traceback.print_exc()
+    
+    finally:
+        await client.close()
+
+
+if __name__ == "__main__":
+    import asyncio
+    asyncio.run(test_{{ database.title | normalize_name }}_crud())

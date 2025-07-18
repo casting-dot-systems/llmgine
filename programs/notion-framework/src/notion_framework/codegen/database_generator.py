@@ -58,6 +58,34 @@ class DatabaseGenerator:
             logger.error(f"Failed to generate database file for '{schema.title}': {e}")
             raise CodeGenerationError(f"Database file generation failed: {e}")
     
+    def generate_crud_functions(self, schema: DatabaseSchema, output_dir: Path) -> Path:
+        """Generate and write CRUD functions to file."""
+        try:
+            logger.info(f"Generating CRUD functions for '{schema.title}'")
+            
+            # Prepare context for template
+            context = self._prepare_context(schema)
+            
+            # Render the tools template
+            code = self.template_engine.render_template("tools.py.j2", context)
+            
+            # Create output directory
+            output_dir.mkdir(parents=True, exist_ok=True)
+            
+            # Generate filename
+            filename = self._get_filename(schema)
+            file_path = output_dir / filename
+            
+            # Write the file
+            file_path.write_text(code, encoding="utf-8")
+            
+            logger.info(f"Generated CRUD functions file: {file_path}")
+            return file_path
+            
+        except Exception as e:
+            logger.error(f"Failed to generate CRUD functions for '{schema.title}': {e}")
+            raise CodeGenerationError(f"CRUD functions generation failed: {e}")
+    
     def _prepare_context(self, schema: DatabaseSchema) -> Dict[str, Any]:
         """Prepare template context from database schema."""
         # Convert property definitions to template-friendly format
