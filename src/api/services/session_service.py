@@ -7,9 +7,10 @@ from enum import Enum
 import threading
 import time
 from typing import Optional
+from pydantic import BaseModel
 import uuid
 
-from llmgine.api.services.engine_service import EngineService
+from api.services.engine_service import EngineService
 from llmgine.llm import SessionID
 
 #TODO Add logging
@@ -19,15 +20,19 @@ class SessionStatus(Enum):
     FAILED = "failed"
     IDLE = "idle"
 
-class Session:
+class Session(BaseModel):
+    """
+    Session model
+    """
+
     def __init__(self):
         self.session_id: SessionID = SessionID(str(uuid.uuid4()))
         self.status: SessionStatus = SessionStatus.RUNNING
-        self.created_at: datetime = datetime.now()
-        self.last_interaction_at: datetime = datetime.now()
+        self.created_at: str = datetime.now().isoformat()
+        self.last_interaction_at: str = datetime.now().isoformat()
 
     def update_last_interaction_at(self):
-        self.last_interaction_at = datetime.now()
+        self.last_interaction_at = datetime.now().isoformat()
 
     def get_session_id(self) -> SessionID:
         return self.session_id
@@ -145,11 +150,11 @@ class SessionService:
                 session = self.sessions[session_id]
 
                 # Check if session should be marked as idle
-                if session.get_status() == SessionStatus.RUNNING and session.last_interaction_at < datetime.now() - timedelta(seconds=self.idle_timeout):
+                if session.get_status() == SessionStatus.RUNNING and datetime.fromisoformat(session.last_interaction_at) < datetime.now() - timedelta(seconds=self.idle_timeout):
                     session.update_status(SessionStatus.IDLE)
                 
                 # Check if session should be deleted
-                if session.get_status() == SessionStatus.IDLE and session.last_interaction_at < datetime.now() - timedelta(seconds=self.delete_idle_timeout):
+                if session.get_status() == SessionStatus.IDLE and datetime.fromisoformat(session.last_interaction_at) < datetime.now() - timedelta(seconds=self.delete_idle_timeout):
                     self.delete_session(session_id)
                     
             time.sleep(1)

@@ -5,7 +5,7 @@ description = "A llm engine to build anything you can imagine."
 authors = [{ name = "Nathan Luo", email = "nathanluo13@gmail.com" }]
 readme = "README.md"
 keywords = ['python']
-requires-python = ">=3.11,<4.0"
+requires-python = ">=3.13,<4.0"
 classifiers = [
     "Intended Audience :: Developers",
     "Programming Language :: Python",

@@ -1,0 +1,1 @@
+"""Core extensibility components for the API module."""

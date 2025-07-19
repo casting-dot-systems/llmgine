@@ -4,6 +4,6 @@ Routers package for the LLMGine API.
 This package contains all the FastAPI routers for different API endpoints.
 """
 
-from . import events, sessions
+from . import sessions, websocket
 
-__all__ = ["events", "sessions"]
+__all__ = ["sessions", "websocket"]

@@ -6,10 +6,11 @@ endpoints including creation, termination, and status queries.
 """
 
 from typing import Optional
-from pydantic import BaseModel, Field
+from pydantic import Field
 from datetime import datetime
 
-from llmgine.api.models.responses import BaseResponse
+from api.models.responses import BaseResponse
+from api.services.session_service import Session
 
 
 class SessionCreateResponse(BaseResponse):
@@ -25,14 +26,13 @@ class SessionEndResponse(BaseResponse):
 class SessionStatusResponse(BaseResponse):
     """Response model for session status queries."""
     session_id: str = Field(..., description="Unique identifier of the session")
-    status: str = Field(..., description="Current status of the session")
     created_at: datetime = Field(..., description="Timestamp when the session was created")
     last_interaction_at: datetime = Field(..., description="Timestamp of the last interaction")
 
 
 class SessionListResponse(BaseResponse):
     """Response model for listing sessions."""
-    sessions: list[dict] = Field(default_factory=list, description="List of active sessions")
+    sessions: list[Session] = Field(default_factory=list, description="List of active sessions")
     total: int = Field(0, description="Total number of sessions")
     limit: int = Field(50, description="Maximum number of sessions returned")
     offset: int = Field(0, description="Number of sessions skipped")

@@ -155,4 +155,3 @@ class EngineService:
                 if engine.status == EngineStatus.IDLE and datetime.fromisoformat(engine.updated_at) < datetime.now() - timedelta(seconds=self.delete_idle_timeout):
                     self.delete_engine(engine_id)
             time.sleep(1)
-
