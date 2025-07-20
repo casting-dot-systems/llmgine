@@ -4,18 +4,18 @@ WebSocket router for the LLMGine API.
 This router handles WebSocket connections for real-time session communication.
 """
 
-from fastapi import APIRouter, Depends, Path, WebSocket, WebSocketDisconnect
+from fastapi import APIRouter, Depends, Path, WebSocket, WebSocketDisconnect, Request
 import logging
 
-from api.models.websocket import WSError, WSErrorCode, ConnectedResponse
-from api.services.session_service import SessionService
+from llmgineAPI.models.websocket import WSError, WSErrorCode, ConnectedResponse
+from llmgineAPI.services.session_service import SessionService
 from llmgine.llm import SessionID
-from api.routers.dependencies import get_session_service
-from api.websocket.registry import create_websocket_manager
+from llmgineAPI.routers.dependencies import get_session_service
+from llmgineAPI.websocket.registry import create_websocket_manager
 
 router = APIRouter(prefix="/api/sessions", tags=["websocket"])
 
-logging.basicConfig(level=logging.INFO)
+logging.basicConfig(level=logging.DEBUG)
 logger = logging.getLogger(__name__)
 
 @router.websocket("/{session_id}/ws")
@@ -65,8 +65,11 @@ async def websocket_endpoint(
             await websocket.close(code=4004)
             return
         
+        # Get API factory from app state (if available)
+        api_factory = getattr(websocket.app.state, 'api_factory', None)
+        
         # Create WebSocket manager with handlers
-        ws_manager = create_websocket_manager(session_service)
+        ws_manager = create_websocket_manager(session_service, api_factory)
         
         # Send connection confirmation
         connected_response = ConnectedResponse(

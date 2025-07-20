@@ -7,7 +7,7 @@ consistent error responses across all API endpoints.
 
 from typing import Any, Dict, Optional
 from fastapi import HTTPException
-from api.models.responses import ErrorDetail, ResponseStatus
+from llmgineAPI.models.responses import ErrorDetail, ResponseStatus
 
 
 class APIError(Exception):

@@ -9,9 +9,9 @@ from typing import Optional, Dict, Any
 from fastapi import WebSocket
 import uvicorn
 
-from api.models.websocket import WSMessage, WSResponse
-from api.websocket.base import BaseHandler
-from api.core.extensibility import (
+from llmgineAPI.models.websocket import WSMessage, WSResponse
+from llmgineAPI.websocket.base import BaseHandler
+from llmgineAPI.core.extensibility import (
     CustomMessageMixin, 
     ExtensibleAPIFactory, 
     EngineConfiguration
@@ -204,6 +204,6 @@ if __name__ == "__main__":
     translation_api = create_translation_api()
     
     # The project would then use this in their main.py:
-    from api.main import create_app
+    from llmgineAPI.main import create_app
     app = create_app(api_factory=translation_api)
     uvicorn.run(app, host="127.0.0.1", port=8000)

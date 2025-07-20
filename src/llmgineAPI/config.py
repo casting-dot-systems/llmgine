@@ -10,7 +10,9 @@ from pydantic import BaseModel, Field
 from pathlib import Path
 import json
 import os
+import logging
 
+logger = logging.getLogger(__name__)
 
 class APIConfig(BaseModel):
     """

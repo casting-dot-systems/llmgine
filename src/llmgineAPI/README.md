@@ -213,3 +213,81 @@ websocket.send(JSON.stringify(pingMessage));
 See `examples/custom_engine_example.py` for a complete implementation example.
 
 This architecture ensures that the API module serves as a **solid foundation** while remaining **completely extensible** for specialized use cases.
+
+
+## TODO:
+  Short-term (1-2 Weeks)
+
+  1. Database Integration
+    - Add SQLAlchemy models for sessions/engines
+    - Implement repository pattern
+    - Add database migrations
+  2. Authentication System
+    - JWT token validation
+    - API key support
+    - Role-based access control
+  3. Enhanced Error Handling
+    - Global exception handlers
+    - Structured error responses
+    - Request correlation IDs
+
+  Medium-term (1 Month)
+
+  1. Performance & Scalability
+    - Connection pooling
+    - Redis caching layer
+    - Rate limiting middleware
+  2. Monitoring & Observability
+    - Structured logging with correlation IDs
+    - Prometheus metrics
+    - Health check endpoints
+    - Request/response logging
+  3. Testing Infrastructure
+    - Unit test utilities
+    - Integration test helpers
+    - WebSocket testing framework
+
+  Security Enhancements
+
+  1. Input Validation
+    - Enhanced WebSocket message validation
+    - Request size limits
+    - SQL injection prevention
+  2. Network Security
+    - Restrict CORS origins
+    - Add request rate limiting
+    - Implement API versioning
+
+  Code Quality Improvements
+
+  Type Safety
+
+  - Add missing type hints throughout
+  - Enable strict mypy checking
+  - Consistent SessionID usage
+
+  Documentation
+
+  - Add comprehensive docstrings
+  - Generate OpenAPI documentation
+  - Create usage examples
+
+  Testing
+
+  - Unit tests for all services
+  - Integration tests for API endpoints
+  - WebSocket testing utilities
+  - Load testing framework
+
+  Production Deployment Checklist
+
+  - Data Persistence - Replace memory storage with database
+  - Authentication - Implement JWT/API key auth
+  - Thread Safety - Fix race conditions in services
+  - Logging - Add structured logging with correlation IDs
+  - Health Checks - Add readiness/liveness probes
+  - Rate Limiting - Prevent DoS attacks
+  - Error Handling - Global exception handlers
+  - Configuration - Environment-specific configs
+  - Monitoring - Metrics and alerting
+  - Security - HTTPS, CORS restrictions, input validation

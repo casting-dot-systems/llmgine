@@ -9,8 +9,8 @@ from typing import Optional
 from pydantic import Field
 from datetime import datetime
 
-from api.models.responses import BaseResponse
-from api.services.session_service import Session
+from llmgineAPI.models.responses import BaseResponse
+from llmgineAPI.services.session_service import Session
 
 
 class SessionCreateResponse(BaseResponse):

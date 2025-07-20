@@ -10,8 +10,8 @@ from fastapi import WebSocket
 from pydantic import BaseModel
 import logging
 
-from api.websocket.base import BaseHandler
-from api.models.websocket import (
+from llmgineAPI.websocket.base import BaseHandler
+from llmgineAPI.models.websocket import (
     PingRequest, PingResponse,
     StatusRequest, StatusResponse,
     CommandRequest, CommandResponse,

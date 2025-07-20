@@ -15,22 +15,22 @@ import logging
 
 from llmgine.llm import SessionID
 
-from api.models.sessions import (
+from llmgineAPI.models.sessions import (
     SessionCreateResponse,
     SessionEndResponse,
     SessionStatusResponse,
     SessionListResponse
 )
-from api.models.responses import ResponseStatus
-from api.services.session_service import SessionService
-from api.utils.error_handler import (
+from llmgineAPI.models.responses import ResponseStatus
+from llmgineAPI.services.session_service import SessionService
+from llmgineAPI.utils.error_handler import (
     SessionNotFoundError,
     ResourceLimitError,
     ValidationError,
     handle_api_error,
     handle_unexpected_error
 )
-from api.routers.dependencies import get_session_service
+from llmgineAPI.routers.dependencies import get_session_service
 
 router = APIRouter(prefix="/api/sessions", tags=["sessions"])
 
@@ -56,6 +56,7 @@ async def create_session(
     """
     try:
         session_id: Optional[SessionID] = session_service.create_session()
+
         if session_id is None:
             raise ResourceLimitError("sessions", session_service.max_sessions)
         
@@ -68,6 +69,7 @@ async def create_session(
     except ResourceLimitError as e:
         raise handle_api_error(e)
     except Exception as e:
+        print(f"Error creating session: {e}")
         raise handle_unexpected_error(e, {"operation": "create_session"})
 
 

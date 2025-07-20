@@ -6,6 +6,8 @@ from datetime import datetime, timedelta
 import threading
 import time
 from typing import Optional
+from threading import RLock
+import atexit
 
 from llmgine.llm import EngineID, SessionID
 from llmgine.llm.engine.engine import Engine, EngineStatus
@@ -18,6 +20,7 @@ class EngineService:
     """
 
     _instance: Optional["EngineService"] = None
+    _lock = RLock()
 
     def __new__(cls):
         if cls._instance is None:
@@ -46,8 +49,12 @@ class EngineService:
         self.max_engines = 10
         self.idle_timeout = 3000 # 30 minutes
         self.delete_idle_timeout = 6000 # 60 minutes
-        self.monitor_thread = threading.Thread(target=self.monitor_engines)
+        self._shutdown = False
+        self.monitor_thread = threading.Thread(target=self.monitor_engines, daemon=True)
         self.monitor_thread.start()
+        
+        # Register cleanup function
+        atexit.register(self.shutdown)
         self._initialized = True
 
     # --- Engine Management ---
@@ -72,12 +79,12 @@ class EngineService:
         None is returned if the max number of engines is reached
         """
 
-        # TODO: Implement race condition protection
-        if len(self.engines) >= self.max_engines:
-            return None
+        with self._lock:
+            if len(self.engines) >= self.max_engines:
+                return None
 
-        self.engines[engine.engine_id] = engine
-        return engine.engine_id
+            self.engines[engine.engine_id] = engine
+            return engine.engine_id
 
     def delete_engine(self, engine_id: EngineID) -> None:
         """
@@ -146,12 +153,21 @@ class EngineService:
         Monitor engines and update their status to IDLE if they have not been interacted with in the last idle_timeout seconds
         and delete them if they have been idle for delete_idle_timeout seconds
         """
-        while True:
-            engine_ids = list(self.engines.keys())
-            for engine_id in engine_ids:
-                engine = self.engines[engine_id]
-                if engine.status == EngineStatus.RUNNING and datetime.fromisoformat(engine.updated_at) < datetime.now() - timedelta(seconds=self.idle_timeout):
-                    self.update_engine_status(engine_id, EngineStatus.IDLE)
-                if engine.status == EngineStatus.IDLE and datetime.fromisoformat(engine.updated_at) < datetime.now() - timedelta(seconds=self.delete_idle_timeout):
-                    self.delete_engine(engine_id)
+        while not self._shutdown:
+            with self._lock:
+                engine_ids = list(self.engines.keys())
+                for engine_id in engine_ids:
+                    engine = self.engines[engine_id]
+                    if engine.status == EngineStatus.RUNNING and datetime.fromisoformat(engine.updated_at) < datetime.now() - timedelta(seconds=self.idle_timeout):
+                        self.update_engine_status(engine_id, EngineStatus.IDLE)
+                    if engine.status == EngineStatus.IDLE and datetime.fromisoformat(engine.updated_at) < datetime.now() - timedelta(seconds=self.delete_idle_timeout):
+                        self.delete_engine(engine_id)
             time.sleep(1)
+
+    def shutdown(self) -> None:
+        """
+        Gracefully shutdown the engine service
+        """
+        self._shutdown = True
+        if hasattr(self, 'monitor_thread') and self.monitor_thread.is_alive():
+            self.monitor_thread.join(timeout=5)

@@ -7,10 +7,12 @@ from enum import Enum
 import threading
 import time
 from typing import Optional
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 import uuid
+from threading import RLock
+import atexit
 
-from api.services.engine_service import EngineService
+from llmgineAPI.services.engine_service import EngineService
 from llmgine.llm import SessionID
 
 #TODO Add logging
@@ -24,12 +26,10 @@ class Session(BaseModel):
     """
     Session model
     """
-
-    def __init__(self):
-        self.session_id: SessionID = SessionID(str(uuid.uuid4()))
-        self.status: SessionStatus = SessionStatus.RUNNING
-        self.created_at: str = datetime.now().isoformat()
-        self.last_interaction_at: str = datetime.now().isoformat()
+    session_id: SessionID = Field(default_factory=lambda: SessionID(str(uuid.uuid4())))
+    status: SessionStatus = Field(default=SessionStatus.RUNNING)
+    created_at: str = Field(default_factory=lambda: datetime.now().isoformat())
+    last_interaction_at: str = Field(default_factory=lambda: datetime.now().isoformat())
 
     def update_last_interaction_at(self):
         self.last_interaction_at = datetime.now().isoformat()
@@ -49,6 +49,7 @@ class SessionService:
     """
 
     _instance: Optional["SessionService"] = None
+    _lock = RLock()
 
     def __new__(cls):
         if cls._instance is None:
@@ -72,19 +73,26 @@ class SessionService:
         self.max_sessions = 100
         self.idle_timeout = 300 # 5 minutes
         self.delete_idle_timeout = 600 # 10 minutes
-        self.monitor_thread = threading.Thread(target=self.monitor_sessions)
+        self._shutdown = False
+        self.monitor_thread = threading.Thread(target=self.monitor_sessions, daemon=True)
         self.monitor_thread.start()
+        
+        # Register cleanup function
+        atexit.register(self.shutdown)
         self._initialized = True
 
     def create_session(self) -> Optional[SessionID]:
         """
         Create a session
         """
-        if len(self.sessions) >= self.max_sessions:
-            return None
-        session = Session()
-        self.sessions[session.get_session_id()] = session
-        return session.get_session_id()
+
+        with self._lock:
+            if len(self.sessions) >= self.max_sessions:
+                return None
+            
+            session = Session()
+            self.sessions[session.get_session_id()] = session
+            return session.get_session_id()
 
     def update_session_last_interaction_at(self, session_id: SessionID):
         """
@@ -143,18 +151,27 @@ class SessionService:
         Monitor sessions and update their status to IDLE if they have not been interacted with in the last idle_timeout seconds
         and delete them if they have been idle for delete_idle_timeout seconds
         """
-        while True:
-            session_ids = list(self.sessions.keys())
-            
-            for session_id in session_ids:
-                session = self.sessions[session_id]
-
-                # Check if session should be marked as idle
-                if session.get_status() == SessionStatus.RUNNING and datetime.fromisoformat(session.last_interaction_at) < datetime.now() - timedelta(seconds=self.idle_timeout):
-                    session.update_status(SessionStatus.IDLE)
+        while not self._shutdown:
+            with self._lock:
+                session_ids = list(self.sessions.keys())
                 
-                # Check if session should be deleted
-                if session.get_status() == SessionStatus.IDLE and datetime.fromisoformat(session.last_interaction_at) < datetime.now() - timedelta(seconds=self.delete_idle_timeout):
-                    self.delete_session(session_id)
+                for session_id in session_ids:
+                    session = self.sessions[session_id]
+
+                    # Check if session should be marked as idle
+                    if session.get_status() == SessionStatus.RUNNING and datetime.fromisoformat(session.last_interaction_at) < datetime.now() - timedelta(seconds=self.idle_timeout):
+                        session.update_status(SessionStatus.IDLE)
                     
+                    # Check if session should be deleted
+                    if session.get_status() == SessionStatus.IDLE and datetime.fromisoformat(session.last_interaction_at) < datetime.now() - timedelta(seconds=self.delete_idle_timeout):
+                        self.delete_session(session_id)
+                        
             time.sleep(1)
+
+    def shutdown(self) -> None:
+        """
+        Gracefully shutdown the session service
+        """
+        self._shutdown = True
+        if hasattr(self, 'monitor_thread') and self.monitor_thread.is_alive():
+            self.monitor_thread.join(timeout=5)

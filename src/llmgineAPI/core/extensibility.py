@@ -3,6 +3,53 @@ Extensibility framework for custom engines and message types.
 
 This module provides base classes and patterns that other projects
 can use to extend the API with custom functionality.
+
+Architecture:
+    The extensibility framework follows a plugin-style architecture where:
+    1. Projects define custom message types using CustomMessageMixin
+    2. Projects create handlers extending BaseHandler
+    3. ExtensibleAPIFactory registers and manages custom components
+    4. The main app integrates custom functionality seamlessly
+
+Usage Example:
+    ```python
+    # 1. Define custom message
+    class CustomRequest(WSMessage, CustomMessageMixin):
+        def __init__(self, data: str):
+            super().__init__(type="custom", data={"data": data})
+    
+    # 2. Create handler
+    class CustomHandler(BaseHandler):
+        @property
+        def message_type(self) -> str:
+            return "custom"
+        
+        @property
+        def request_model(self) -> type[WSMessage]:
+            return CustomRequest
+        
+        async def handle(self, message, websocket, session_id):
+            # Custom logic here
+            return CustomResponse(...)
+    
+    # 3. Register with factory
+    config = EngineConfiguration(engine_name="MyEngine")
+    factory = ExtensibleAPIFactory(config)
+    factory.register_custom_handler("custom", CustomHandler)
+    
+    # 4. Create app with extensions
+    app = create_app(api_factory=factory)
+    ```
+
+Key Components:
+    - CustomMessageMixin: Mixin for creating custom message types
+    - ExtensibleHandlerRegistry: Registry for managing handlers
+    - EngineConfiguration: Base configuration with extensibility
+    - ExtensibleAPIFactory: Factory for creating customized APIs
+
+Thread Safety:
+    All registry operations are thread-safe. Handler instances are created
+    per WebSocket manager to avoid shared state issues.
 """
 
 from abc import ABC, abstractmethod
@@ -10,8 +57,8 @@ from typing import Dict, Type, Any, Optional, List
 from pydantic import BaseModel
 from fastapi import APIRouter
 
-from api.models.websocket import WSMessage, WSResponse
-from api.websocket.base import BaseHandler
+from llmgineAPI.models.websocket import WSMessage, WSResponse
+from llmgineAPI.websocket.base import BaseHandler
 
 
 class CustomMessageMixin:

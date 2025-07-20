@@ -4,6 +4,35 @@ WebSocket message models for the LLMGine API.
 This module defines Pydantic models for WebSocket communication
 including request/response models and error handling.
 
+Usage:
+    Basic WebSocket message structure:
+    {
+        "type": "message_type",
+        "data": { ... }
+    }
+
+    Creating custom messages:
+    ```python
+    class CustomRequest(WSMessage):
+        def __init__(self, custom_field: str):
+            super().__init__(
+                type="custom_request",
+                data={"custom_field": custom_field}
+            )
+    ```
+
+Message Types:
+    - ping: Test WebSocket connection
+    - get_engine_types: List available engine types
+    - link_engine: Create and link an engine to session
+    - status: Get session status
+    - command: Execute a command (placeholder)
+    - event: Publish an event (placeholder)
+
+Error Handling:
+    All errors return WSError with error code and message.
+    WebSocket connections are automatically closed on critical errors.
+
 Applications can create new request and response models by extending the WSMessage and WSResponse classes.
 """
 

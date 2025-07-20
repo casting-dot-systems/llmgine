@@ -6,12 +6,15 @@ for creating customized apps with project-specific extensions.
 """
 
 from typing import Optional
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+import time
+from datetime import datetime
 
-from api.config import config_manager, APIConfig
-from api.core.extensibility import ExtensibleAPIFactory
-from api.routers import sessions, websocket
+from llmgineAPI.config import config_manager, APIConfig
+from llmgineAPI.core.extensibility import ExtensibleAPIFactory
+from llmgineAPI.routers import sessions, websocket
+from llmgineAPI.routers.dependencies import get_session_service, get_engine_service
 
 
 def create_app(
@@ -50,6 +53,9 @@ def create_app(
         allow_headers=config.cors_headers,
     )
     
+    # Store API factory in app state for access by routers
+    app.state.api_factory = api_factory
+    
     # Include core routers
     app.include_router(sessions.router)
     app.include_router(websocket.router)
@@ -84,8 +90,62 @@ def create_app(
     
     @app.get("/health")
     async def health_check():
-        """Health check endpoint."""
-        return {"status": "healthy", "service": config.title.lower().replace(" ", "-")}
+        """Basic health check endpoint."""
+        return {
+            "status": "healthy", 
+            "service": config.title.lower().replace(" ", "-"),
+            "timestamp": datetime.now().isoformat(),
+            "uptime": time.time()
+        }
+    
+    @app.get("/health/ready")
+    async def readiness_check():
+        """Readiness check - indicates if the service is ready to handle requests."""
+        try:
+            session_service = get_session_service()
+            engine_service = get_engine_service()
+            
+            # Check if services are initialized
+            if not hasattr(session_service, '_initialized') or not session_service._initialized:
+                raise HTTPException(status_code=503, detail="Session service not initialized")
+            
+            if not hasattr(engine_service, '_initialized') or not engine_service._initialized:
+                raise HTTPException(status_code=503, detail="Engine service not initialized")
+            
+            # Check if monitor threads are running
+            if not session_service.monitor_thread.is_alive():
+                raise HTTPException(status_code=503, detail="Session monitor thread not running")
+                
+            if not engine_service.monitor_thread.is_alive():
+                raise HTTPException(status_code=503, detail="Engine monitor thread not running")
+            
+            return {
+                "status": "ready",
+                "timestamp": datetime.now().isoformat(),
+                "services": {
+                    "sessions": {
+                        "initialized": True,
+                        "monitor_running": session_service.monitor_thread.is_alive(),
+                        "count": len(session_service.sessions)
+                    },
+                    "engines": {
+                        "initialized": True,
+                        "monitor_running": engine_service.monitor_thread.is_alive(),
+                        "count": len(engine_service.engines)
+                    }
+                }
+            }
+        except Exception as e:
+            raise HTTPException(status_code=503, detail=f"Service not ready: {str(e)}")
+    
+    @app.get("/health/live")
+    async def liveness_check():
+        """Liveness check - indicates if the service is alive."""
+        return {
+            "status": "alive",
+            "timestamp": datetime.now().isoformat(),
+            "pid": None  # Could add os.getpid() if needed
+        }
     
     @app.get("/api/info")
     async def api_info():

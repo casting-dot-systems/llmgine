@@ -8,9 +8,9 @@ including service singletons and request validation.
 import re
 from fastapi import Depends
 
-from api.services.engine_service import EngineService
-from api.services.session_service import SessionService, SessionStatus
-from api.utils.error_handler import (
+from llmgineAPI.services.engine_service import EngineService
+from llmgineAPI.services.session_service import SessionService, SessionStatus
+from llmgineAPI.utils.error_handler import (
     SessionIDValidationError,
     SessionNotFoundError,
     SessionInvalidError,
