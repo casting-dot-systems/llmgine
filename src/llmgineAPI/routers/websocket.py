@@ -4,7 +4,7 @@ WebSocket router for the LLMGine API.
 This router handles WebSocket connections for real-time session communication.
 """
 
-from fastapi import APIRouter, Depends, Path, WebSocket, WebSocketDisconnect, Request
+from fastapi import APIRouter, Depends, Path, WebSocket, WebSocketDisconnect
 import logging
 
 from llmgineAPI.models.websocket import WSError, WSErrorCode, ConnectedResponse

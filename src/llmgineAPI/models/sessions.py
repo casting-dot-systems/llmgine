@@ -7,7 +7,6 @@ endpoints including creation, termination, and status queries.
 
 from typing import Optional
 from pydantic import Field
-from datetime import datetime
 
 from llmgineAPI.models.responses import BaseResponse
 from llmgineAPI.services.session_service import Session
@@ -26,8 +25,8 @@ class SessionEndResponse(BaseResponse):
 class SessionStatusResponse(BaseResponse):
     """Response model for session status queries."""
     session_id: str = Field(..., description="Unique identifier of the session")
-    created_at: datetime = Field(..., description="Timestamp when the session was created")
-    last_interaction_at: datetime = Field(..., description="Timestamp of the last interaction")
+    created_at: str = Field(..., description="Timestamp when the session was created")
+    last_interaction_at: str = Field(..., description="Timestamp of the last interaction")
 
 
 class SessionListResponse(BaseResponse):

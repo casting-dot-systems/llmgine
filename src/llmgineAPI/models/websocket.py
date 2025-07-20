@@ -126,8 +126,8 @@ class LinkEngineResponse(WSResponse):
 
 class StatusResponse(WSResponse):
     """Status response."""
-    def __init__(self, session_id: str, status: str, created_at: datetime, last_interaction_at: datetime):
-        super().__init__(type="status_res", data={"session_id": session_id, "status": status, "created_at": created_at.isoformat(), "last_interaction_at": last_interaction_at.isoformat()})
+    def __init__(self, session_id: str, status: str, created_at: str, last_interaction_at: str):
+        super().__init__(type="status_res", data={"session_id": session_id, "status": status, "created_at": created_at, "last_interaction_at": last_interaction_at})
     
 
 class CommandResponse(WSResponse):

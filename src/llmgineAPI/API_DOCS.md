@@ -213,52 +213,6 @@ Test WebSocket connection.
 }
 ```
 
-#### Get Engine Types
-List available engine types.
-
-**Request:**
-```json
-{
-  "type": "get_engine_types",
-  "data": {}
-}
-```
-
-**Response:**
-```json
-{
-  "type": "engine_types",
-  "data": {
-    "engine_types": ["SinglePassEngine", "ToolChatEngine", "VoiceProcessingEngine"]
-  }
-}
-```
-
-#### Link Engine
-Create and link an engine to the session.
-
-**Request:**
-```json
-{
-  "type": "link_engine",
-  "data": {
-    "engine_type": "ToolChatEngine"
-  }
-}
-```
-
-**Response:**
-```json
-{
-  "type": "engine_linked",
-  "data": {
-    "engine_id": "engine_123",
-    "engine_type": "ToolChatEngine",
-    "status": "running"
-  }
-}
-```
-
 #### Status
 Get session status.
 

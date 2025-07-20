@@ -7,15 +7,13 @@ WebSocket message type.
 
 from typing import Optional
 from fastapi import WebSocket
-from pydantic import BaseModel
 import logging
 
 from llmgineAPI.websocket.base import BaseHandler
 from llmgineAPI.models.websocket import (
     PingRequest, PingResponse,
     StatusRequest, StatusResponse,
-    CommandRequest, CommandResponse,
-    EventRequest, EventResponse,
+    WSMessage,
     WSResponse, WSError, WSErrorCode
 )
 from llmgine.llm import SessionID
@@ -31,12 +29,12 @@ class PingHandler(BaseHandler):
         return "ping"
     
     @property
-    def request_model(self) -> type[BaseModel]:
+    def request_model(self) -> type[WSMessage]:
         return PingRequest
     
     async def handle(
         self, 
-        message: PingRequest, 
+        message: WSMessage, 
         websocket: WebSocket, 
         session_id: SessionID
     ) -> Optional[WSResponse]:
@@ -53,12 +51,12 @@ class StatusHandler(BaseHandler):
         return "status"
     
     @property
-    def request_model(self) -> type[BaseModel]:
+    def request_model(self) -> type[WSMessage]:
         return StatusRequest
     
     async def handle(
         self, 
-        message: StatusRequest, 
+        message: WSMessage, 
         websocket: WebSocket, 
         session_id: SessionID
     ) -> Optional[WSResponse]:
@@ -76,52 +74,4 @@ class StatusHandler(BaseHandler):
             status=session.get_status().value,
             created_at=session.created_at,
             last_interaction_at=session.last_interaction_at
-        )
-
-
-class CommandHandler(BaseHandler):
-    """Handler for command execution requests."""
-    
-    @property
-    def message_type(self) -> str:
-        return "command"
-    
-    @property
-    def request_model(self) -> type[BaseModel]:
-        return CommandRequest
-    
-    async def handle(
-        self, 
-        message: CommandRequest, 
-        websocket: WebSocket, 
-        session_id: SessionID
-    ) -> Optional[WSResponse]:
-        """Handle command request."""
-        return CommandResponse(
-            message="Command execution not yet implemented in WebSocket",
-            command_data={"command": message.data.command, "parameters": message.data.parameters}
-        )
-
-
-class EventHandler(BaseHandler):
-    """Handler for event publishing requests."""
-    
-    @property
-    def message_type(self) -> str:
-        return "event"
-    
-    @property
-    def request_model(self) -> type[BaseModel]:
-        return EventRequest
-    
-    async def handle(
-        self, 
-        message: EventRequest, 
-        websocket: WebSocket, 
-        session_id: SessionID
-    ) -> Optional[WSResponse]:
-        """Handle event request."""
-        return EventResponse(
-            message="Event publishing not yet implemented in WebSocket",
-            event_data=message.data
         )

@@ -133,7 +133,7 @@ class AnalyzeTextHandler(BaseHandler):
         
         # TODO: Implement actual analysis logic here
         # For demo purposes, return mock analysis results
-        analysis_results = {}
+        analysis_results: Dict[str, Any] = {}
         
         if "sentiment" in analysis_types:
             analysis_results["sentiment"] = {

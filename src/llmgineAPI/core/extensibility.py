@@ -52,12 +52,10 @@ Thread Safety:
     per WebSocket manager to avoid shared state issues.
 """
 
-from abc import ABC, abstractmethod
 from typing import Dict, Type, Any, Optional, List
 from pydantic import BaseModel
 from fastapi import APIRouter
 
-from llmgineAPI.models.websocket import WSMessage, WSResponse
 from llmgineAPI.websocket.base import BaseHandler
 
 

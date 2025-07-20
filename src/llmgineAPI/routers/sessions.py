@@ -22,7 +22,7 @@ from llmgineAPI.models.sessions import (
     SessionListResponse
 )
 from llmgineAPI.models.responses import ResponseStatus
-from llmgineAPI.services.session_service import SessionService
+from llmgineAPI.services.session_service import Session, SessionService
 from llmgineAPI.utils.error_handler import (
     SessionNotFoundError,
     ResourceLimitError,
@@ -98,7 +98,7 @@ async def get_session_status(
             
         return SessionStatusResponse(
             session_id=session_id,
-            status=session.get_status().value,
+            status=ResponseStatus.SUCCESS,
             created_at=session.created_at,
             last_interaction_at=session.last_interaction_at
         )
@@ -136,18 +136,11 @@ async def list_sessions(
         all_sessions = session_service.get_all_sessions()
         
         # Convert sessions to dict format for response
-        sessions_list = []
-        for session_id, session in all_sessions.items():
-            sessions_list.append({
-                "session_id": str(session_id),
-                "status": session.get_status().value,
-                "created_at": session.created_at.isoformat(),
-                "last_interaction_at": session.last_interaction_at.isoformat()
-            })
+        sessions_list : list[Session] = list(all_sessions.values())
         
         # Apply pagination
         total = len(sessions_list)
-        paginated_sessions = sessions_list[offset:offset + limit]
+        paginated_sessions : list[Session] = sessions_list[offset:offset + limit]
         
         return SessionListResponse(
             sessions=paginated_sessions,

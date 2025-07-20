@@ -73,7 +73,7 @@ class ConfigManager:
     
     def load_from_env(self, prefix: str = "LLMGINE_API_") -> APIConfig:
         """Load configuration from environment variables."""
-        config_data = {}
+        config_data : dict[str, Any] = {}
         
         # Map environment variables to config fields
         env_mapping = {
@@ -115,13 +115,13 @@ class ConfigManager:
         """
         
         # Start with defaults
-        config_data = {}
+        config_data : dict[str, Any] = {}
         
         # Load from file if provided
         if config_file:
             try:
                 file_config = self.load_from_file(config_file)
-                config_data.update(file_config.dict())
+                config_data.update(file_config.model_dump())
             except FileNotFoundError:
                 logger.warning(f"Config file not found: {config_file}, using defaults")
         
@@ -129,8 +129,8 @@ class ConfigManager:
         try:
             env_config = self.load_from_env(env_prefix)
             # Only update with non-default env values
-            env_dict = env_config.dict()
-            default_dict = self.config_class().dict()
+            env_dict = env_config.model_dump()
+            default_dict = self.config_class().model_dump()
             
             for key, value in env_dict.items():
                 if value != default_dict.get(key):
