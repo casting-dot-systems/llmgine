@@ -10,8 +10,7 @@ from llmgineAPI.websocket.base import WebSocketManager
 from llmgineAPI.websocket.handlers import (
     PingHandler,
     StatusHandler,
-    CommandHandler,
-    EventHandler
+    CreateSessionHandler,
 )
 from llmgineAPI.services.session_service import SessionService
 from llmgineAPI.core.extensibility import global_handler_registry, ExtensibleAPIFactory
@@ -40,7 +39,6 @@ def create_websocket_manager(
     # Register core handlers manually (these aren't in the extensible registry)
     manager.register_handler(PingHandler(session_service))
     manager.register_handler(StatusHandler(session_service))
-    manager.register_handler(CommandHandler(session_service))
-    manager.register_handler(EventHandler(session_service))
+    manager.register_handler(CreateSessionHandler(session_service))
     
     return manager

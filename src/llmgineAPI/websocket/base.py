@@ -111,7 +111,6 @@ class WebSocketManager:
         self, 
         raw_message: str, 
         websocket: WebSocket, 
-        session_id: SessionID
     ) -> Optional[WSResponse]:
         """
         Process an incoming WebSocket message.
@@ -136,13 +135,36 @@ class WebSocketManager:
                     "Message must be valid JSON"
                 )
             
+            # Extract message_id if available
+            message_id = data.get("message_id")
+            
+            # Get session id from data
+            session_id = data.get("session_id")
+            if not session_id:
+                return WSError(
+                    WSErrorCode.VALIDATION_ERROR,
+                    "Message must include 'session_id' field",
+                    message_id=message_id
+                )
+            
+            # Validate session id
+            session_service = SessionService()
+            session = session_service.get_session(session_id)
+            if not session:
+                return WSError(
+                    WSErrorCode.SESSION_NOT_FOUND,
+                    f"Session '{session_id}' not found or has expired",
+                    message_id=message_id
+                )
+            
             # Extract message type
             print(f"Data: {data}")
             message_type = data.get("type")
             if not message_type:
                 return WSError(
                     WSErrorCode.VALIDATION_ERROR,
-                    "Message must include 'type' field"
+                    "Message must include 'type' field",
+                    message_id=message_id
                 )
             
             # Find handler
@@ -151,7 +173,8 @@ class WebSocketManager:
             if not handler:
                 return WSError(
                     WSErrorCode.INVALID_MESSAGE_TYPE,
-                    f"Unknown message type: {message_type}"
+                    f"Unknown message type: {message_type}",
+                    message_id=message_id
                 )
             print(f"Handler: {handler}")
             # Validate message
@@ -160,7 +183,8 @@ class WebSocketManager:
             except ValidationError as e:
                 return WSError(
                     WSErrorCode.VALIDATION_ERROR,
-                    f"Validation failed: {str(e)}"
+                    f"Validation failed: {str(e)}",
+                    message_id=message_id
                 )
             print(f"Validated message: {validated_message}")
             # Update session activity
@@ -173,7 +197,8 @@ class WebSocketManager:
             logger.error(f"Error processing message: {e}")
             return WSError(
                 WSErrorCode.WEBSOCKET_ERROR,
-                f"Internal error: {str(e)}"
+                f"Internal error: {str(e)}",
+                message_id=data.get("message_id") if 'data' in locals() else None
             )
     
     async def send_response(self, websocket: WebSocket, response: WSResponse) -> None:
