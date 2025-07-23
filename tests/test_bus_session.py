@@ -9,7 +9,7 @@ from llmgine.bus.bus import MessageBus
 from llmgine.bus.session import BusSession, SessionStartEvent, SessionEndEvent
 from llmgine.messages.commands import Command, CommandResult
 from llmgine.messages.events import Event
-from llmgine.observability.events import EventLogWrapper  # Needed for assertions
+# from llmgine.observability.events import EventLogWrapper  # Not used
 
 # Mark all tests in this module as asyncio
 pytestmark = pytest.mark.asyncio
@@ -85,12 +85,9 @@ class CallRecorder:
             self.calls.append({"args": args, "kwargs": kwargs})
             # Store event/command if passed
             if args:
-                # Handle both raw events and wrapped events
+                # Handle both events and commands
                 event_arg = args[0]
-                if isinstance(event_arg, EventLogWrapper):
-                    self.event_calls.append(event_arg)
-                elif isinstance(event_arg, Event):
-                    # If handler receives raw event (though unlikely with current bus setup)
+                if isinstance(event_arg, Event):
                     self.event_calls.append(event_arg)
                 elif isinstance(event_arg, Command):
                     self.command_calls.append(event_arg)
@@ -102,7 +99,7 @@ class CallRecorder:
             # Simulate returning a successful result for commands
             return CommandResult(
                 success=True,
-                original_command=msg,
+                command_id=msg.command_id,
                 result="Async processed: " + getattr(msg, "data", ""),
             )
         return None  # Events don't return results
@@ -171,8 +168,8 @@ async def test_register_and_execute_global_command(clean_message_bus: MessageBus
     assert await recorder.received_command(MockCommand)
     assert result.success
     assert result.result == "Async processed: test_global_cmd"
-    assert result.original_command == cmd
-    assert result.original_command.session_id is not None  # Should get a default session
+    # CommandResult doesn't store the original command anymore
+    # Check that the command was executed correctly via the result
 
 
 async def test_register_and_publish_global_event(clean_message_bus: MessageBus):

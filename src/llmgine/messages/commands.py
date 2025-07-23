@@ -25,7 +25,7 @@ class Command:
     command_id: str = field(default_factory=lambda: str(uuid.uuid4()))
     timestamp: str = field(default_factory=lambda: datetime.now().isoformat())
     metadata: Dict[str, Any] = field(default_factory=dict)
-    session_id: SessionID = field(default_factory=lambda: SessionID("ROOT"))
+    session_id: SessionID = field(default_factory=lambda: SessionID("BUS"))
     
     def __post_init__(self) -> None:
         pass
@@ -42,7 +42,7 @@ class CommandResult:
     result: Optional[Any] = None
     error: Optional[str] = None
     metadata: Dict[str, Any] = field(default_factory=dict)
-    session_id: SessionID = field(default_factory=lambda: SessionID("ROOT"))
+    session_id: SessionID = field(default_factory=lambda: SessionID("BUS"))
 
     def __post_init__(self) -> None:
         # Add metadata about where this command was handled

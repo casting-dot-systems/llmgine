@@ -54,10 +54,23 @@ class BusSession:
 
     async def __aenter__(self):
         """Start the session and publish a session start event."""
-
         # Publish a session start event and await it
-        await self.bus.publish(SessionStartEvent(session_id=self.session_id))
+        await self.bus.publish(SessionStartEvent(session_id=SessionID(self.session_id)))
         return self
+    
+    async def start(self):
+        """Start the session (for non-context-manager usage)."""
+        await self.bus.publish(SessionStartEvent(session_id=SessionID(self.session_id)))
+    
+    async def end(self):
+        """End the session (for non-context-manager usage)."""
+        if not self._active:
+            return
+        try:
+            self.bus.unregister_session_handlers(SessionID(self.session_id))
+            await self.bus.publish(SessionEndEvent(session_id=SessionID(self.session_id)))
+        finally:
+            self._active = False
 
     async def __aexit__(self, exc_type, exc_value, traceback):
         """Clean up the session, unregistering all handlers and publishing end event."""
@@ -66,11 +79,11 @@ class BusSession:
 
         try:
             # Unregister all event and command handlers for this session (synchronous)
-            self.bus.unregister_session_handlers(self.session_id)
+            self.bus.unregister_session_handlers(SessionID(self.session_id))
 
             # Publish session end event and await it
             end_event = SessionEndEvent(
-                session_id=self.session_id, error=exc_value if exc_type else None
+                session_id=SessionID(self.session_id), error=exc_value if exc_type else None
             )
             await self.bus.publish(end_event)
 
@@ -91,7 +104,7 @@ class BusSession:
             raise RuntimeError("Cannot register handlers on an inactive session")
 
         # Pass session_id explicitly to the bus registration method
-        self.bus.register_event_handler(self.session_id, event_type, handler)
+        self.bus.register_event_handler(event_type, handler, SessionID(self.session_id))
         return self  # For method chaining
 
     def register_command_handler(
@@ -107,7 +120,7 @@ class BusSession:
             raise RuntimeError("Cannot register handlers on an inactive session")
 
         # Pass session_id explicitly to the bus registration method
-        self.bus.register_command_handler(self.session_id, command_type, handler)
+        self.bus.register_command_handler(command_type, handler, SessionID(self.session_id))
         return self  # For method chaining
 
     async def execute_with_session(self, command: Command) -> Any:

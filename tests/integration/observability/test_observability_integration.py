@@ -65,7 +65,7 @@ class TestObservabilityIntegration:
             published_events.append(event)
         
         # Register handler to track all events
-        bus.register_event_handler(Event, track_event, SessionID("ROOT"))
+        bus.register_event_handler(Event, track_event)
         
         try:
             # Publish a regular event
@@ -158,7 +158,7 @@ class TestObservabilityIntegration:
             async def track_event(event):
                 received_events.append(event)
             
-            bus.register_event_handler(Event, track_event, SessionID("ROOT"))
+            bus.register_event_handler(Event, track_event)
             
             # Publish event - handler error should not prevent normal processing
             event = Event(session_id="test-session")
