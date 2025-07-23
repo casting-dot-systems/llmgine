@@ -316,7 +316,7 @@ class TestResilientMessageBus:
         
         # With jitter, delays should vary
         assert len(set(delays)) > 1
-        assert all(0.05 <= d <= 0.15 for d in delays)  # 0.1 * (0.5 to 1.5)
+        assert all(0 <= d <= 0.1 for d in delays)  # Full jitter: 0 to initial_delay
 
     @pytest.mark.asyncio
     async def test_handler_returning_failure(self, resilient_bus):

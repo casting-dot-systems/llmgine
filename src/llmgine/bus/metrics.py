@@ -66,11 +66,29 @@ class Histogram:
         if not self.values:
             return None
         
+        if not 0 <= percentile <= 100:
+            raise ValueError(f"Percentile must be between 0 and 100, got {percentile}")
+        
         sorted_values = sorted(self.values)
-        index = int(len(sorted_values) * percentile / 100)
-        if index >= len(sorted_values):
-            index = len(sorted_values) - 1
-        return sorted_values[index]
+        # Use proper percentile calculation with interpolation
+        n = len(sorted_values)
+        if n == 1:
+            return sorted_values[0]
+        
+        # Calculate the exact position
+        pos = (n - 1) * percentile / 100
+        lower_index = int(pos)
+        upper_index = min(lower_index + 1, n - 1)
+        
+        # Interpolate if needed
+        if lower_index == upper_index:
+            return sorted_values[lower_index]
+        
+        lower_value = sorted_values[lower_index]
+        upper_value = sorted_values[upper_index]
+        fraction = pos - lower_index
+        
+        return lower_value + fraction * (upper_value - lower_value)
     
     def get_bucket_counts(self) -> Dict[float, int]:
         """Get counts for each bucket."""

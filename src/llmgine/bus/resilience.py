@@ -178,9 +178,9 @@ class CircuitBreaker:
         self.last_state_change = datetime.now()
         logger.info(f"Circuit breaker '{self.name}' transitioned to CLOSED")
         
-        # Update metrics
+        # Update metrics with label for specific circuit breaker
         metrics = get_metrics_collector()
-        metrics.set_gauge("circuit_breaker_state", 0)  # 0=closed
+        metrics.set_gauge("circuit_breaker_state", 0, labels={"breaker": self.name})  # 0=closed
     
     def _transition_to_open(self) -> None:
         """Transition to OPEN state."""
@@ -189,9 +189,9 @@ class CircuitBreaker:
         self.last_state_change = datetime.now()
         logger.warning(f"Circuit breaker '{self.name}' transitioned to OPEN")
         
-        # Update metrics
+        # Update metrics with label for specific circuit breaker
         metrics = get_metrics_collector()
-        metrics.set_gauge("circuit_breaker_state", 1)  # 1=open
+        metrics.set_gauge("circuit_breaker_state", 1, labels={"breaker": self.name})  # 1=open
     
     def _transition_to_half_open(self) -> None:
         """Transition to HALF_OPEN state."""
@@ -200,9 +200,9 @@ class CircuitBreaker:
         self.last_state_change = datetime.now()
         logger.info(f"Circuit breaker '{self.name}' transitioned to HALF_OPEN")
         
-        # Update metrics
+        # Update metrics with label for specific circuit breaker
         metrics = get_metrics_collector()
-        metrics.set_gauge("circuit_breaker_state", 2)  # 2=half-open
+        metrics.set_gauge("circuit_breaker_state", 2, labels={"breaker": self.name})  # 2=half-open
     
     def get_state_info(self) -> Dict[str, Any]:
         """Get current state information."""
@@ -427,7 +427,8 @@ class ResilientMessageBus(MessageBus):
         # Add jitter if enabled
         if self._retry_config.jitter:
             import random
-            delay *= (0.5 + random.random())
+            # Use full jitter strategy for better distribution
+            delay = random.uniform(0, delay)
             
         return delay
 
