@@ -167,6 +167,79 @@ bus.add_event_filter(
 )
 ```
 
+## Performance Monitoring
+
+The message bus includes comprehensive metrics collection for monitoring production systems:
+
+### Available Metrics
+
+**Counters:**
+- `events_published_total` - Total events published to the bus
+- `events_processed_total` - Successfully processed events  
+- `events_failed_total` - Failed event processing
+- `commands_sent_total` - Total commands sent
+- `commands_processed_total` - Successfully processed commands
+- `commands_failed_total` - Failed command processing
+
+**Histograms:**
+- `event_processing_duration_seconds` - Event handler execution time
+- `command_processing_duration_seconds` - Command handler execution time
+
+**Gauges:**
+- `queue_size` - Current event queue size
+- `backpressure_active` - Binary indicator (0 or 1)
+- `circuit_breaker_state` - State indicator (0=closed, 1=open, 2=half-open)
+- `dead_letter_queue_size` - Current DLQ size
+- `active_sessions` - Number of active sessions
+- `registered_handlers` - Total registered handlers
+
+### Accessing Metrics
+
+```python
+# Get current metrics
+metrics = await bus.get_metrics()
+
+# Example output structure
+{
+    "counters": {
+        "events_published_total": {"value": 1000, "description": "..."},
+        "commands_processed_total": {"value": 50, "description": "..."}
+    },
+    "histograms": {
+        "event_processing_duration_seconds": {
+            "count": 1000,
+            "sum": 45.2,
+            "percentiles": {"p50": 0.042, "p95": 0.089, "p99": 0.152},
+            "buckets": {0.01: 200, 0.05: 700, ...}
+        }
+    },
+    "gauges": {
+        "queue_size": {"value": 10, "description": "..."},
+        "circuit_breaker_state": {"value": 0, "description": "..."}
+    }
+}
+```
+
+### Integration with Monitoring Systems
+
+The metrics are designed to integrate with monitoring systems like Prometheus:
+
+```python
+from llmgine.bus.metrics import get_metrics_collector
+
+# Access the global metrics collector
+collector = get_metrics_collector()
+
+# Export metrics in your preferred format
+async def export_prometheus():
+    metrics = await collector.get_metrics()
+    # Convert to Prometheus format
+    for name, counter in metrics["counters"].items():
+        print(f'# HELP {name} {counter["description"]}')
+        print(f'# TYPE {name} counter')
+        print(f'{name} {counter["value"]}')
+```
+
 ## Advanced Features
 
 ### Resilient Message Bus

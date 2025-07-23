@@ -11,6 +11,7 @@ from enum import Enum
 from typing import Any, Callable, Generic, Optional, TypeVar
 
 from llmgine.messages.events import Event
+from llmgine.bus.metrics import get_metrics_collector
 
 logger = logging.getLogger(__name__)
 
@@ -216,6 +217,10 @@ class BoundedEventQueue(Generic[T]):
         
         logger.warning(f"Backpressure activated: queue size {self.qsize()}/{self._maxsize}")
         
+        # Update metrics
+        metrics = get_metrics_collector()
+        metrics.set_gauge("backpressure_active", 1)
+        
         if self._on_high_water:
             try:
                 self._on_high_water()
@@ -225,6 +230,10 @@ class BoundedEventQueue(Generic[T]):
     def _deactivate_backpressure(self) -> None:
         """Deactivate backpressure mechanisms."""
         self._backpressure_active = False
+        
+        # Update metrics
+        metrics = get_metrics_collector()
+        metrics.set_gauge("backpressure_active", 0)
         
         # Reset adaptive rate limit
         if self._strategy == BackpressureStrategy.ADAPTIVE_RATE_LIMIT:

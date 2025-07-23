@@ -13,6 +13,7 @@ from typing import cast
 
 from llmgine.bus.bus import MessageBus, AsyncCommandHandler
 from llmgine.bus.backpressure import BoundedEventQueue, BackpressureStrategy
+from llmgine.bus.metrics import get_metrics_collector
 from llmgine.messages.commands import Command, CommandResult
 from llmgine.messages.events import Event, CommandResultEvent
 from llmgine.messages.scheduled_events import ScheduledEvent
@@ -176,6 +177,10 @@ class CircuitBreaker:
         self.recent_failures = []
         self.last_state_change = datetime.now()
         logger.info(f"Circuit breaker '{self.name}' transitioned to CLOSED")
+        
+        # Update metrics
+        metrics = get_metrics_collector()
+        metrics.set_gauge("circuit_breaker_state", 0)  # 0=closed
     
     def _transition_to_open(self) -> None:
         """Transition to OPEN state."""
@@ -183,6 +188,10 @@ class CircuitBreaker:
         self.success_count = 0
         self.last_state_change = datetime.now()
         logger.warning(f"Circuit breaker '{self.name}' transitioned to OPEN")
+        
+        # Update metrics
+        metrics = get_metrics_collector()
+        metrics.set_gauge("circuit_breaker_state", 1)  # 1=open
     
     def _transition_to_half_open(self) -> None:
         """Transition to HALF_OPEN state."""
@@ -190,6 +199,10 @@ class CircuitBreaker:
         self.success_count = 0
         self.last_state_change = datetime.now()
         logger.info(f"Circuit breaker '{self.name}' transitioned to HALF_OPEN")
+        
+        # Update metrics
+        metrics = get_metrics_collector()
+        metrics.set_gauge("circuit_breaker_state", 2)  # 2=half-open
     
     def get_state_info(self) -> Dict[str, Any]:
         """Get current state information."""
@@ -448,6 +461,10 @@ class ResilientMessageBus(MessageBus):
         try:
             await self._dead_letter_queue.put(entry)
             logger.info(f"Added command {type(command).__name__} to dead letter queue")
+            
+            # Update metrics
+            metrics = get_metrics_collector()
+            metrics.set_gauge("dead_letter_queue_size", self._dead_letter_queue.qsize())
             
             # Publish event about dead letter
             await self.publish(Event(

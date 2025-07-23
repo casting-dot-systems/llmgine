@@ -12,7 +12,8 @@ This document provides a detailed architectural overview of the LLMgine Message 
 6. [Event Processing Pipeline](#event-processing-pipeline)
 7. [Resilience Patterns](#resilience-patterns)
 8. [Performance Optimizations](#performance-optimizations)
-9. [Extension Points](#extension-points)
+9. [Metrics and Monitoring](#metrics-and-monitoring)
+10. [Extension Points](#extension-points)
 
 ## Core Concepts
 
@@ -386,6 +387,88 @@ class BoundedEventQueue:
         
         await self._queue.put(item)
         return True
+```
+
+## Metrics and Monitoring
+
+### Metrics Architecture
+
+The bus provides comprehensive metrics collection with minimal performance impact:
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                     MetricsCollector                        │
+├─────────────────────────────────────────────────────────────┤
+│ Counters:                                                   │
+│ - events_published_total                                    │
+│ - events_processed_total                                    │
+│ - events_failed_total                                       │
+│ - commands_sent_total                                       │
+│ - commands_processed_total                                  │
+│ - commands_failed_total                                     │
+├─────────────────────────────────────────────────────────────┤
+│ Histograms:                                                 │
+│ - event_processing_duration_seconds                         │
+│ - command_processing_duration_seconds                       │
+├─────────────────────────────────────────────────────────────┤
+│ Gauges:                                                     │
+│ - queue_size                                                │
+│ - backpressure_active                                       │
+│ - circuit_breaker_state                                     │
+│ - dead_letter_queue_size                                    │
+│ - active_sessions                                           │
+│ - registered_handlers                                       │
+└─────────────────────────────────────────────────────────────┘
+```
+
+### Integration Points
+
+Metrics are collected at key points in the message flow:
+
+1. **Command Execution**:
+   - Increment `commands_sent_total` on execute()
+   - Time execution with `command_processing_duration_seconds`
+   - Update `commands_processed_total` or `commands_failed_total`
+
+2. **Event Publishing**:
+   - Increment `events_published_total` on publish()
+   - Update `queue_size` gauge
+
+3. **Event Processing**:
+   - Time handler execution with `event_processing_duration_seconds`
+   - Update `events_processed_total` or `events_failed_total`
+
+4. **Resilience Features**:
+   - Track `circuit_breaker_state` transitions
+   - Monitor `dead_letter_queue_size`
+   - Update `backpressure_active` on threshold crossing
+
+### Performance Considerations
+
+Metrics collection is designed for minimal overhead:
+
+- **Lock-free counters**: Simple atomic increments
+- **Sampling support**: Histograms can be sampled in production
+- **Lazy calculation**: Percentiles computed only on request
+- **Context managers**: Zero-allocation timing with `Timer`
+
+### Export Formats
+
+The metrics can be exported in various formats:
+
+```python
+# Prometheus format
+events_published_total 1000
+command_processing_duration_seconds_bucket{le="0.01"} 200
+command_processing_duration_seconds_bucket{le="0.05"} 700
+
+# JSON format (for custom dashboards)
+{
+    "timestamp": "2024-01-20T10:30:00Z",
+    "counters": {...},
+    "histograms": {...},
+    "gauges": {...}
+}
 ```
 
 ## Extension Points

@@ -37,6 +37,7 @@ from llmgine.bus.interfaces import (
     IMessageBus,
 )
 from llmgine.bus.registry_simple import HandlerRegistry
+from llmgine.bus.metrics import Timer, get_metrics_collector
 from llmgine.bus.session import BusSession
 from llmgine.bus.utils import is_async_function
 from llmgine.database.database import get_and_delete_unfinished_events, save_unfinished_events
@@ -190,6 +191,8 @@ class MessageBus(IMessageBus):
         session_id: SessionID = SessionID("BUS"),
     ) -> None:
         """Register a command handler."""
+        metrics = get_metrics_collector()
+        
         if not is_async_function(handler):
             handler = self._wrap_sync_command_handler(
                 cast(Callable[[Command], CommandResult], handler)
@@ -198,6 +201,13 @@ class MessageBus(IMessageBus):
         self._registry.register_command_handler(
             command_type, cast(AsyncCommandHandler, handler), session_id
         )
+        
+        # Update registered handlers gauge
+        total_handlers = sum(
+            len(handlers) 
+            for handlers in getattr(self._registry, "_event_handlers", {}).values()
+        )
+        metrics.set_gauge("registered_handlers", total_handlers)
     
     def register_event_handler(
         self,
@@ -207,6 +217,8 @@ class MessageBus(IMessageBus):
         priority: int = HandlerPriority.NORMAL,
     ) -> None:
         """Register an event handler."""
+        metrics = get_metrics_collector()
+        
         if not is_async_function(handler):
             handler = self._wrap_sync_event_handler(
                 cast(Callable[[Event], None], handler)
@@ -219,11 +231,21 @@ class MessageBus(IMessageBus):
                 self._registry.register_event_handler(
                     event_type, cast(AsyncEventHandler, handler), session_id, priority
                 )
-                return
+            else:
+                self._registry.register_event_handler(
+                    event_type, cast(AsyncEventHandler, handler), session_id
+                )
+        else:
+            self._registry.register_event_handler(
+                event_type, cast(AsyncEventHandler, handler), session_id
+            )
         
-        self._registry.register_event_handler(
-            event_type, cast(AsyncEventHandler, handler), session_id
+        # Update registered handlers gauge
+        total_handlers = sum(
+            len(handlers) 
+            for handlers in getattr(self._registry, "_event_handlers", {}).values()
         )
+        metrics.set_gauge("registered_handlers", total_handlers)
     
     def unregister_session_handlers(self, session_id: SessionID) -> None:
         """Unregister all handlers for a session."""
@@ -250,12 +272,16 @@ class MessageBus(IMessageBus):
     
     async def execute(self, command: Command) -> CommandResult:
         """Execute a command and return its result."""
+        metrics = get_metrics_collector()
         command_type = type(command)
+        
+        metrics.inc_counter("commands_sent_total")
         
         handler = self._registry.get_command_handler(command_type, command.session_id)
         if handler is None:
             error_msg = f"No handler registered for command {command_type.__name__}"
             logger.error(error_msg)
+            metrics.inc_counter("commands_failed_total")
             return CommandResult(
                 success=False,
                 command_id=command.command_id,
@@ -268,7 +294,13 @@ class MessageBus(IMessageBus):
                 await_processing=False,
             )
             
-            result = await self._execute_with_middleware(command, handler)
+            with Timer(metrics, "command_processing_duration_seconds"):
+                result = await self._execute_with_middleware(command, handler)
+            
+            if result.success:
+                metrics.inc_counter("commands_processed_total")
+            else:
+                metrics.inc_counter("commands_failed_total")
             
             await self.publish(
                 CommandResultEvent(command_result=result, session_id=command.session_id),
@@ -279,6 +311,7 @@ class MessageBus(IMessageBus):
             
         except Exception as e:
             logger.exception(f"Error executing command {command_type.__name__}: {e}")
+            metrics.inc_counter("commands_failed_total")
             failed_result = CommandResult(
                 success=False,
                 command_id=command.command_id,
@@ -324,6 +357,8 @@ class MessageBus(IMessageBus):
     
     async def publish(self, event: Event, await_processing: bool = True) -> None:
         """Publish an event to the bus."""
+        metrics = get_metrics_collector()
+        
         if self._event_queue is None:
             logger.warning("Event queue not initialized, event will be lost")
             return
@@ -340,6 +375,8 @@ class MessageBus(IMessageBus):
                 return
         
         await self._event_queue.put(event)
+        metrics.inc_counter("events_published_total")
+        metrics.set_gauge("queue_size", self._event_queue.qsize())
         
         if await_processing and not isinstance(event, ScheduledEvent):
             await self.wait_for_events()
@@ -454,8 +491,12 @@ class MessageBus(IMessageBus):
         handler: AsyncEventHandler,
     ) -> None:
         """Handle event through middleware chain."""
+        metrics = get_metrics_collector()
+        
         async def execute_handler(evt: Event, h: AsyncEventHandler) -> None:
-            await h(evt)
+            with Timer(metrics, "event_processing_duration_seconds"):
+                await h(evt)
+            metrics.inc_counter("events_processed_total")
         
         chain = execute_handler
         for middleware in reversed(self._event_middleware):
@@ -478,6 +519,9 @@ class MessageBus(IMessageBus):
         error: Exception,
     ) -> None:
         """Handle errors from event handlers."""
+        metrics = get_metrics_collector()
+        metrics.inc_counter("events_failed_total")
+        
         self.event_handler_errors.append(error)
         handler_name = getattr(handler, "__qualname__", repr(handler))
         
@@ -571,6 +615,13 @@ class MessageBus(IMessageBus):
         
         if events:
             logger.info(f"Loaded {len(events)} scheduled events")
+    
+    # --- Metrics Access ---
+    
+    async def get_metrics(self) -> Dict[str, Any]:
+        """Get current bus metrics."""
+        metrics = get_metrics_collector()
+        return await metrics.get_metrics()
     
     # --- Helper Methods ---
     
