@@ -10,7 +10,7 @@ import uuid
 from typing import Dict, Set
 from threading import RLock
 
-from llmgineAPI.models.websocket import WSError, WSErrorCode, ConnectedResponse, MESSAGE_ID
+from llmgineAPI.models.websocket import WSError, WSErrorCode, ConnectedResponse
 from llmgineAPI.services.session_service import SessionService
 from llmgineAPI.services.engine_service import EngineService
 from llmgineAPI.websocket.registry import create_websocket_manager
@@ -125,9 +125,12 @@ async def websocket_endpoint(
         
         # Send connection confirmation with app_id
         connected_response = ConnectedResponse(
-            app_id=app_id,
-            status="connected",
-            message_id=MESSAGE_ID(str(uuid.uuid4()))
+            type="connected",
+            message_id=str(uuid.uuid4()),
+            data=ConnectedResponse.ConnectedResponseData(
+                app_id=app_id,
+                status="connected"
+            )
         )
         await ws_manager.send_response(websocket, connected_response)
         logger.info(f"Connection confirmation sent for app {app_id}")
@@ -146,7 +149,9 @@ async def websocket_endpoint(
                 
                 # Send response if one was generated
                 if response:
+                    print(f"Sending response: {response}")
                     await ws_manager.send_response(websocket, response)
+                    print(f"Response sent: {response}")
                     
             except WebSocketDisconnect:
                 logger.info(f"WebSocket disconnected for app {app_id}")
@@ -156,9 +161,13 @@ async def websocket_endpoint(
         logger.error(f"WebSocket error for app {app_id}: {e}")
         try:
             error_response = WSError(
-                WSErrorCode.WEBSOCKET_ERROR,
-                f"WebSocket error: {str(e)}",
-                MESSAGE_ID(str(uuid.uuid4()))
+                type="error",
+                message_id=str(uuid.uuid4()),
+                data=WSError.WSErrorData(
+                    code=WSErrorCode.WEBSOCKET_ERROR,
+                    message=f"WebSocket error: {str(e)}",
+                    details=None
+                )
             )
             await websocket.send_text(error_response.model_dump_json())
         except:

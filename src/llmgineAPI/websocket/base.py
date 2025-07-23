@@ -7,6 +7,7 @@ handling WebSocket messages in a structured way.
 
 from abc import ABC, abstractmethod
 from typing import Any, Dict, Optional, TYPE_CHECKING
+import uuid
 from fastapi import WebSocket
 from pydantic import ValidationError
 import json
@@ -14,7 +15,6 @@ import logging
 
 from llmgineAPI.models.websocket import WSMessage, WSResponse, WSError, WSErrorCode
 from llmgineAPI.services.session_service import SessionService
-from llmgine.llm import SessionID
 
 if TYPE_CHECKING:
     from llmgineAPI.core.extensibility import ExtensibleHandlerRegistry
@@ -44,9 +44,8 @@ class BaseHandler(ABC):
     @abstractmethod
     async def handle(
         self, 
-        message: WSMessage, 
+        message: Dict[str, Any], 
         websocket: WebSocket, 
-        session_id: SessionID
     ) -> Optional[WSResponse]:
         """
         Handle the incoming message and return a response.
@@ -54,14 +53,13 @@ class BaseHandler(ABC):
         Args:
             message: The validated message object
             websocket: The WebSocket connection
-            session_id: The session ID
             
         Returns:
             Optional response to send back to the client
         """
         pass
     
-    def validate_message(self, raw_data: Dict[str, Any]) -> WSMessage:
+    def validate_message(self, raw_data: Dict[str, Any]) -> None:
         """
         Validate the raw message data against the request model.
         
@@ -75,7 +73,7 @@ class BaseHandler(ABC):
             ValidationError: If validation fails
         """
         try:
-            return self.request_model(**raw_data)
+            self.request_model(**raw_data)
         except ValidationError as e:
             logger.error(f"Validation error for {self.message_type}: {e}")
             raise
@@ -131,74 +129,112 @@ class WebSocketManager:
                 data = json.loads(raw_message)
             except json.JSONDecodeError:
                 return WSError(
-                    WSErrorCode.INVALID_JSON,
-                    "Message must be valid JSON"
+                    type="error",
+                    message_id=str(uuid.uuid4()),
+                    data=WSError.WSErrorData(
+                        code=WSErrorCode.INVALID_JSON,
+                        message="Message must be valid JSON",
+                        details=None
+                    )
                 )
             
+            print(f"Data: {data}")
             # Extract message_id if available
             message_id = data.get("message_id")
             
-            # Get session id from data
-            session_id = data.get("session_id")
-            if not session_id:
-                return WSError(
-                    WSErrorCode.VALIDATION_ERROR,
-                    "Message must include 'session_id' field",
-                    message_id=message_id
-                )
-            
-            # Validate session id
-            session_service = SessionService()
-            session = session_service.get_session(session_id)
-            if not session:
-                return WSError(
-                    WSErrorCode.SESSION_NOT_FOUND,
-                    f"Session '{session_id}' not found or has expired",
-                    message_id=message_id
-                )
-            
             # Extract message type
-            print(f"Data: {data}")
             message_type = data.get("type")
             if not message_type:
                 return WSError(
-                    WSErrorCode.VALIDATION_ERROR,
-                    "Message must include 'type' field",
-                    message_id=message_id
+                    type="error",
+                    message_id=message_id,
+                    data=WSError.WSErrorData(
+                        code=WSErrorCode.VALIDATION_ERROR,
+                        message="Message must include 'type' field",
+                        details=None
+                    )
                 )
-            
-            # Find handler
 
+            # Get session id from data
+            if message_type != "create_session":
+                session_id = data.get("data", {}).get("session_id")
+                
+                if not session_id:
+                    return WSError(
+                        type="error",
+                        message_id=message_id,
+                        data=WSError.WSErrorData(
+                            code=WSErrorCode.VALIDATION_ERROR,
+                            message="Message must include 'session_id' field",
+                            details=None
+                        )
+                    )
+
+
+                # Validate session id
+                session_service = SessionService()
+                session = session_service.get_session(session_id)
+
+
+                if not session:
+                    return WSError(
+                        type="error",
+                        message_id=message_id,
+                        data=WSError.WSErrorData(
+                            code=WSErrorCode.SESSION_NOT_FOUND,
+                            message=f"Session '{session_id}' not found or has expired",
+                            details=None
+                        )
+                    )
+                print("here2")
+            
+
+
+            # Find handler
+            print(f"Handlers: {self.handlers}")
             handler = self.handlers.get(message_type)
             if not handler:
                 return WSError(
-                    WSErrorCode.INVALID_MESSAGE_TYPE,
-                    f"Unknown message type: {message_type}",
-                    message_id=message_id
+                    type="error",
+                    message_id=message_id,
+                    data=WSError.WSErrorData(
+                        code=WSErrorCode.INVALID_MESSAGE_TYPE,
+                        message=f"Unknown message type: {message_type}",
+                        details=None
+                    )
                 )
             print(f"Handler: {handler}")
             # Validate message
             try:
-                validated_message = handler.validate_message(data.get("data", {}))
+                handler.validate_message(data)
             except ValidationError as e:
                 return WSError(
-                    WSErrorCode.VALIDATION_ERROR,
-                    f"Validation failed: {str(e)}",
-                    message_id=message_id
+                    type="error",
+                    message_id=message_id,
+                    data=WSError.WSErrorData(
+                        code=WSErrorCode.VALIDATION_ERROR,
+                        message=f"Validation failed: {str(e)}",
+                        details=None
+                    )
                 )
-            print(f"Validated message: {validated_message}")
+            print(f"Validated message: {data}")
             # Update session activity
-            self.session_service.update_session_last_interaction_at(session_id)
+            if message_type != "create_session":
+                self.session_service.update_session_last_interaction_at(data.get("session_id"))
             
             # Handle message
-            return await handler.handle(validated_message, websocket, session_id)
+            return await handler.handle(data, websocket)
             
         except Exception as e:
             logger.error(f"Error processing message: {e}")
             return WSError(
-                WSErrorCode.WEBSOCKET_ERROR,
-                f"Internal error: {str(e)}",
-                message_id=data.get("message_id") if 'data' in locals() else None
+                type="error",
+                message_id=str(uuid.uuid4()),
+                data=WSError.WSErrorData(
+                    code=WSErrorCode.WEBSOCKET_ERROR,
+                    message=f"Internal error: {str(e)}",
+                    details=None
+                )
             )
     
     async def send_response(self, websocket: WebSocket, response: WSResponse) -> None:
