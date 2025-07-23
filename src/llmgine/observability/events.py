@@ -4,11 +4,8 @@ This module contains event types used primarily for observability purposes,
 such as logging, tracing, and metrics.
 """
 
-import uuid
-from dataclasses import dataclass, field
-from datetime import datetime
+from dataclasses import dataclass
 from enum import Enum
-from typing import Any, Dict, Optional
 
 from llmgine.messages.events import Event
 

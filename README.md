@@ -175,8 +175,20 @@ config = ApplicationConfig(enable_console_handler=True,
 await ApplicationBootstrap(config).bootstrap()
 ```
 
-*All events/commands flow through `ConsoleEventHandler` and `FileEventHandler`
-to a timestamped `logs/events_*.jsonl` file.*
+The observability system uses a standalone `ObservabilityManager` that:
+- Operates independently of the message bus (no circular dependencies)
+- Provides synchronous handlers (see note below)
+- Supports console, file, and OpenTelemetry handlers
+- Can be extended with custom handlers
+
+*All events flow through the configured handlers to console and/or timestamped `logs/events_*.jsonl` files.*
+
+**⚠️ Performance Note**: The current implementation uses synchronous handlers which can block the event loop in high-throughput scenarios. This is suitable for development and low-volume production use. See the [Observability System documentation](src/llmgine/observability/README.md#performance-considerations) for details and planned improvements.
+
+For OpenTelemetry support:
+```bash
+pip install llmgine[opentelemetry]
+```
 
 ---
 
@@ -194,6 +206,7 @@ Comprehensive documentation is available in the [`docs/`](docs/) directory:
 ### Component Documentation
 - **[Message Bus](src/llmgine/bus/README.md)** - Event and command bus architecture
 - **[Tools System](src/llmgine/llm/tools/README.md)** - Function calling and tool registration
+- **[Observability System](src/llmgine/observability/README.md)** - Standalone observability architecture
 - **[Observability CLI](programs/observability-cli/README.md)** - CLI monitoring tool
 - **[Observability GUI](programs/observability-gui/README.md)** - React-based monitoring interface
 

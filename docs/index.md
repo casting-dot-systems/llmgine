@@ -23,9 +23,19 @@ Access detailed user stories in the [stories directory](./stories/index.md):
 - Test Coverage (Core & Providers)
 - Documentation Integration
 
+## Component Documentation
+
+- [Observability System](../src/llmgine/observability/README.md) - Standalone observability architecture
+- [Message Bus](../src/llmgine/bus/README.md) - Event and command bus architecture
+- [Tools System](../src/llmgine/llm/tools/README.md) - Function calling and tool registration
+
+## Observability Documentation
+
+- [Architecture Guide](./observability-architecture.md) - Design decisions and performance analysis
+- [Migration Guide](./observability-migration-guide.md) - Upgrading from EventLogWrapper
+- [Cookbook](./observability-cookbook.md) - Practical recipes and examples
+
 ## Quick Links
 
 - [Main README](../README.md) - Getting started and overview
 - [CLAUDE.md](../CLAUDE.md) - AI assistant instructions
-- [Message Bus Documentation](../src/llmgine/bus/README.md)
-- [Tools System Documentation](../src/llmgine/llm/tools/README.md)

@@ -50,6 +50,14 @@ Homepage = "https://nathan-luo.github.io/llmgine/"
 Repository = "https://github.com/nathan-luo/llmgine"
 Documentation = "https://nathan-luo.github.io/llmgine/"
 
+[project.optional-dependencies]
+opentelemetry = [
+    "opentelemetry-api>=1.20.0",
+    "opentelemetry-sdk>=1.20.0",
+    "opentelemetry-exporter-otlp>=1.20.0",
+    "opentelemetry-semantic-conventions>=0.41b0"
+]
+
 [dependency-groups]
 dev = [
     "pytest>=7.2.0",

@@ -37,7 +37,7 @@ from llmgine.messages.events import (
     EventHandlerFailedEvent,
 )
 from llmgine.messages.scheduled_events import ScheduledEvent
-from llmgine.observability.handlers.base import ObservabilityEventHandler
+from llmgine.observability.manager import ObservabilityManager
 from llmgine.database.database import get_and_delete_unfinished_events, save_unfinished_events
 
 # Get the base logger and wrap it with the adapter
@@ -81,10 +81,13 @@ class MessageBus:
             cls._instance._initialized = False
         return cls._instance
 
-    def __init__(self) -> None:
+    def __init__(self, observability: Optional[ObservabilityManager] = None) -> None:
         """
         Initialize the message bus (only once).
-        Sets up handler storage, event queue, and observability handlers.
+        Sets up handler storage, event queue, and observability.
+        
+        Args:
+            observability: Optional ObservabilityManager instance
         """
         if getattr(self, "_initialized", False):
             return
@@ -97,7 +100,7 @@ class MessageBus:
         ] = {}
         self._event_queue: Optional[asyncio.Queue[Event]] = None
         self._processing_task: Optional[asyncio.Task[None]] = None
-        self._observability_handlers: List[ObservabilityEventHandler] = []
+        self._observability: Optional[ObservabilityManager] = observability
         self._suppress_event_errors: bool = True
         self.event_handler_errors: List[Exception] = []
         logger.info("MessageBus initialized")
@@ -178,13 +181,14 @@ class MessageBus:
         else:
             logger.info("MessageBus already stopped or never started")
 
-    def register_observability_handler(self, handler: ObservabilityEventHandler) -> None:
+    def set_observability_manager(self, observability: ObservabilityManager) -> None:
         """
-        Register an observability handler for a specific session.
+        Set the observability manager for this message bus.
+        
+        Args:
+            observability: The ObservabilityManager instance
         """
-        # TODO: add tracing and span
-        # TODO: add option to await or not await
-        self._observability_handlers.append(handler)
+        self._observability = observability
 
     def register_command_handler(
         self,
@@ -381,6 +385,10 @@ class MessageBus:
             f"Publishing event {type(event).__name__} in session {event.session_id}"
         )
 
+        # Direct call to observability - no event publishing
+        if self._observability:
+            self._observability.observe_event(event)
+
         try:
             if self._event_queue is None:
                 raise ValueError("Event queue is not initialized")
@@ -499,20 +507,7 @@ class MessageBus:
                 f"No non-observability handler registered for event type {event_type}"
             )
 
-        for handler in self._observability_handlers:
-            logger.debug(
-                f"Dispatching event {event_type} in session {event.session_id} to observability handler {handler.__class__.__name__}"
-            )
-            try:
-                await handler.handle(event)
-            except Exception as e:
-                logger.exception(
-                    f"Error in observability handler {handler.__name__}: {e}"
-                )
-                if not self._suppress_event_errors:
-                    raise e
-                else:
-                    self.event_handler_errors.append(e)
+        # Observability is called in publish(), so we don't need to call it here again
 
         logger.debug(
             f"Dispatching event {event_type} in session {event.session_id} to {len(handlers)} handlers"  # type: ignore
