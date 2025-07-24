@@ -165,7 +165,9 @@ class EngineCLI:
         self.component_lookup[event] = component
         self.bus.register_event_handler(event, self.component_router, self.session_id)
 
-    def register_prompt_command(self, command: Type[Command], prompt: CLIPrompt) -> None:
+    def register_prompt_command(
+        self, command: Type[Command], prompt: CLIPrompt
+    ) -> None:
         self.prompt_lookup[command] = prompt
         self.bus.register_command_handler(command, self.prompt_router, self.session_id)
 

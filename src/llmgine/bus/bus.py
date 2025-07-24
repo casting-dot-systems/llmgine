@@ -1,19 +1,20 @@
 """Core message bus implementation for handling commands and events.
 
-The message bus is the central communication mechanism in the application,
-providing a way for components to communicate without direct dependencies.
+This module provides a clean, production-ready message bus with:
+- Session-scoped and bus-scoped handler management
+- Async event processing with batching
+- Middleware and filter support
+- Error recovery and observability
 """
 
-import os
-import sys
 import asyncio
-import contextvars
-from datetime import datetime
 import logging
 import traceback
-from types import TracebackType
+from contextlib import asynccontextmanager
+from datetime import datetime
 from typing import (
     Any,
+    AsyncIterator,
     Awaitable,
     Callable,
     Dict,
@@ -25,8 +26,21 @@ from typing import (
     cast,
 )
 
+from llmgine.bus.interfaces import (
+    AsyncCommandHandler,
+    AsyncEventHandler,
+    EventFilter,
+    HandlerMiddleware,
+    HandlerPriority,
+    IEventQueue,
+    IHandlerRegistry,
+    IMessageBus,
+)
+from llmgine.bus.registry_simple import HandlerRegistry
+from llmgine.bus.metrics import Timer, get_metrics_collector
 from llmgine.bus.session import BusSession
 from llmgine.bus.utils import is_async_function
+from llmgine.database.database import get_and_delete_unfinished_events, save_unfinished_events
 from llmgine.llm import SessionID
 from llmgine.messages.approvals import ApprovalCommand, execute_approval_command
 from llmgine.messages.commands import Command, CommandResult
@@ -39,701 +53,641 @@ from llmgine.messages.events import (
     SessionEndEvent,
 )
 from llmgine.messages.scheduled_events import ScheduledEvent
-from llmgine.observability.handlers.base import ObservabilityEventHandler
-from llmgine.database.database import get_and_delete_unfinished_events, save_unfinished_events
+from llmgine.observability.manager import ObservabilityManager
 
-# Get the base logger and wrap it with the adapter
+
 logger = logging.getLogger(__name__)
 
-# TODO: add tracing and span context using contextvars
-trace: contextvars.ContextVar[Optional[str]] = contextvars.ContextVar(
-    "trace", default=None
-)
-span: contextvars.ContextVar[Optional[str]] = contextvars.ContextVar("span", default=None)
-
-# Type variables for command and event handlers
 CommandType = TypeVar("CommandType", bound=Command)
-CommandHandler = Callable[[Command], CommandResult]
-AsyncCommandHandler = Callable[[Command], Awaitable[CommandResult]]
 EventType = TypeVar("EventType", bound=Event)
-EventHandler = Callable[[Event], None]
-AsyncEventHandler = Callable[[Event], Awaitable[None]]
 
 
-# Combined types
-AsyncOrSyncCommandHandler = Union[AsyncCommandHandler, CommandHandler]
-
-
-class MessageBus:
-    """Async message bus for command and event handling (Singleton).
-
-    This is a simplified implementation of the Command Bus and Event Bus patterns,
-    allowing for decoupled communication between components.
+class MessageBus(IMessageBus):
+    """Async message bus for command and event handling.
+    
+    Features:
+    - Clean separation between session-scoped and bus-scoped handlers
+    - Thread-safe singleton pattern
+    - Middleware and filter support
+    - Optimized batch event processing
+    - Built-in error recovery and observability
     """
-
-    # --- Singleton Pattern ---
+    
     _instance: Optional["MessageBus"] = None
-
+    _lock = asyncio.Lock()
+    
     def __new__(cls, *args: Any, **kwargs: Any) -> "MessageBus":
-        """
-        Ensure only one instance is created (Singleton pattern).
-        """
+        """Thread-safe singleton implementation."""
         if cls._instance is None:
-            cls._instance = super().__new__(cls)
-            cls._instance._initialized = False
+            placeholder = super().__new__(cls)
+            if cls._instance is None:
+                cls._instance = placeholder
         return cls._instance
-
-    def __init__(self) -> None:
-        """
-        Initialize the message bus (only once).
-        Sets up handler storage, event queue, and observability handlers.
-        """
-        if getattr(self, "_initialized", False):
-            return
-
-        self._command_handlers: Dict[
-            SessionID, Dict[Type[Command], AsyncCommandHandler]
-        ] = {}
-        self._event_handlers: Dict[
-            SessionID, Dict[Type[Event], List[AsyncEventHandler]]
-        ] = {}
-        self._event_queue: Optional[asyncio.Queue[Event]] = None
-        self._processing_task: Optional[asyncio.Task[None]] = None
-        self._observability_handlers: List[ObservabilityEventHandler] = []
-        self._suppress_event_errors: bool = True
-        self.event_handler_errors: List[Exception] = []
-        self._shutdown_event: asyncio.Event = asyncio.Event()
-        self._new_event_signal: asyncio.Event = asyncio.Event()
-        self._handler_timeout: float = 30.0  # Default 30 second timeout
-        logger.info("MessageBus initialized")
-        self._initialized = True
-        self.data_dir = os.path.dirname(os.path.abspath(__file__))
-
-    async def reset(self) -> None:
-        """
-        Stops the bus if running. Reset the message bus to its initial state.
-        """
-        await self.stop()
-        # Clear all handlers
-        self._command_handlers.clear()
-        self._event_handlers.clear()
-        self.event_handler_errors.clear()
-        self._observability_handlers.clear()
-        # Create new event objects to avoid event loop binding issues
-        self._shutdown_event = asyncio.Event()
-        self._new_event_signal = asyncio.Event()
-        # Reset to defaults
-        self._handler_timeout = 30.0
-        self._suppress_event_errors = True
-        logger.info("MessageBus reset")
-
-    def suppress_event_errors(self) -> None:
-        """
-        Surpress errors during event handling.
-        """
-        self._suppress_event_errors = True
-
-    def unsuppress_event_errors(self) -> None:
-        """
-        Unsupress errors during event handling.
-        """
-        self._suppress_event_errors = False
-
-    def set_handler_timeout(self, timeout: float) -> None:
-        """
-        Set the timeout for event and command handlers.
+    
+    def __init__(
+        self,
+        registry: Optional[IHandlerRegistry] = None,
+        event_queue: Optional[IEventQueue] = None,
+        observability: Optional[ObservabilityManager] = None,
+    ) -> None:
+        """Initialize the message bus.
         
         Args:
-            timeout: Timeout in seconds for handlers to complete
+            registry: Custom handler registry (defaults to HandlerRegistry)
+            event_queue: Custom event queue (defaults to asyncio.Queue)
+            observability: Observability manager for event tracking
         """
-        self._handler_timeout = timeout
-        logger.info(f"Handler timeout set to {timeout} seconds")
-
-        """
-        Register an observability handler for this message bus.
-        Registers the handler for both general and specific observability events.
-        """
-
-    def create_session(self, id_input: Optional[str] = None) -> BusSession:
-        """
-        Create a new session for grouping related commands and events.
-        Args:
-            id: Optional session identifier. If not provided, one will be generated.
-        Returns:
-            A new BusSession instance.
-        """
-        return BusSession(id=id_input)
-
+        if hasattr(self, "_initialized") and self._initialized:
+            return
+        
+        self._registry: IHandlerRegistry = registry or HandlerRegistry()
+        self._event_queue: Optional[asyncio.Queue[Event]] = cast(
+            Optional[asyncio.Queue[Event]], event_queue
+        )
+        self._observability = observability
+        
+        # Middleware and filters
+        self._command_middleware: List[HandlerMiddleware] = []
+        self._event_middleware: List[HandlerMiddleware] = []
+        self._event_filters: List[EventFilter] = []
+        
+        # Processing state
+        self._processing_task: Optional[asyncio.Task[None]] = None
+        self._running = False
+        self._suppress_event_errors = True
+        self.event_handler_errors: List[Exception] = []
+        
+        # Performance settings
+        self._batch_size = 10
+        self._batch_timeout = 0.01
+        
+        self._initialized = True
+        logger.info("MessageBus initialized")
+    
+    # --- Lifecycle Management ---
+    
     async def start(self) -> None:
-        """
-        Start the message bus event processing loop.
-        Creates the event queue and launches the event processing task if not already running.
-        """
-        if self._processing_task is None:
+        """Start the message bus event processing."""
+        async with self._lock:
+            if self._running:
+                logger.warning("MessageBus is already running")
+                return
+            
             if self._event_queue is None:
                 self._event_queue = asyncio.Queue()
-                logger.info("Event queue created")
-            await self._load_queue()
+            
+            await self._load_scheduled_events()
+            
+            self._running = True
             self._processing_task = asyncio.create_task(self._process_events())
             logger.info("MessageBus started")
-        else:
-            logger.warning("MessageBus already running")
-
+    
     async def stop(self) -> None:
-        """
-        Stop the message bus event processing loop.
-        Cancels the event processing task and cleans up.
-        """
-        if self._processing_task:
-            logger.info("Stopping message bus...")
-            self._shutdown_event.set()
+        """Stop the message bus event processing."""
+        async with self._lock:
+            if not self._running:
+                logger.info("MessageBus is not running")
+                return
             
-            await self._dump_queue()
+            self._running = False
+            
+            if self._processing_task:
+                self._processing_task.cancel()
+                try:
+                    await asyncio.wait_for(self._processing_task, timeout=2.0)
+                except (asyncio.CancelledError, asyncio.TimeoutError):
+                    pass
+                except Exception as e:
+                    logger.exception(f"Error stopping processing task: {e}")
+                finally:
+                    self._processing_task = None
+            
+            await self._save_scheduled_events()
             self._event_queue = None
-
-            try:
-                await asyncio.wait_for(self._processing_task, timeout=2.0)
-                logger.info("MessageBus stopped successfully")
-            except asyncio.CancelledError:
-                logger.info("MessageBus task cancelled successfully")
-            except Exception as e:
-                logger.exception(f"Error during MessageBus shutdown: {e}")
-            finally:
-                self._processing_task = None
-        else:
-            logger.info("MessageBus already stopped or never started")
-
-    def register_observability_handler(self, handler: ObservabilityEventHandler) -> None:
-        """
-        Register an observability handler for a specific session.
-        """
-        # TODO: add tracing and span
-        # TODO: add option to await or not await
-        self._observability_handlers.append(handler)
-
+            
+            logger.info("MessageBus stopped")
+    
+    async def reset(self) -> None:
+        """Reset the message bus to initial state."""
+        await self.stop()
+        # Reset the registry
+        self._registry = HandlerRegistry()
+        # Clear middleware and filters
+        self._command_middleware.clear()
+        self._event_middleware.clear()
+        self._event_filters.clear()
+        # Clear errors
+        self.event_handler_errors.clear()
+        # Reset other state
+        self._suppress_event_errors = True
+        self._batch_size = 10
+        self._batch_timeout = 0.01
+        logger.info("MessageBus reset")
+    
+    # --- Handler Registration ---
+    
     def register_command_handler(
         self,
         command_type: Type[CommandType],
-        handler: AsyncOrSyncCommandHandler,
-        session_id: str = "ROOT",
+        handler: Union[AsyncCommandHandler, Callable[[Command], CommandResult]],
+        session_id: SessionID = SessionID("BUS"),
     ) -> None:
-        """
-        Register a command handler for a specific command type and session.
-        Args:
-            session_id: The session identifier (or 'ROOT').
-            command_type: The type of command to handle.
-            handler: The handler function/coroutine.
-        Raises:
-            ValueError: If a handler is already registered for the command in this session.
-        """
-
-        if session_id not in self._command_handlers:
-            self._command_handlers[SessionID(session_id)] = {}
-
-        # Check if handler is already wrapped
+        """Register a command handler."""
+        metrics = get_metrics_collector()
+        
         if not is_async_function(handler):
-            # Only wrap if not already wrapped
-            if not hasattr(handler, '_is_wrapped'):
-                handler = self._wrap_command_handler_as_async(cast(CommandHandler, handler))
-
-        if command_type in self._command_handlers[SessionID(session_id)]:
-            raise ValueError(
-                f"Command handler for {command_type} already registered in session {session_id}"
+            handler = self._wrap_sync_command_handler(
+                cast(Callable[[Command], CommandResult], handler)
             )
-
-        self._command_handlers[SessionID(session_id)][command_type] = cast(
-            AsyncCommandHandler, handler
+        
+        self._registry.register_command_handler(
+            command_type, cast(AsyncCommandHandler, handler), session_id
         )
-        logger.debug(
-            f"Registered command handler for {command_type} in session {session_id}"
-        )  # TODO test
-
+        
+        # Update registered handlers gauge
+        total_handlers = sum(
+            len(handlers) 
+            for handlers in getattr(self._registry, "_event_handlers", {}).values()
+        )
+        metrics.set_gauge("registered_handlers", total_handlers)
+    
     def register_event_handler(
         self,
         event_type: Type[EventType],
-        handler: Union[AsyncEventHandler, EventHandler],
-        session_id: SessionID = SessionID("ROOT"),
+        handler: Union[AsyncEventHandler, Callable[[Event], None]],
+        session_id: SessionID = SessionID("BUS"),
+        priority: int = HandlerPriority.NORMAL,
     ) -> None:
-        """
-        Register an event handler for a specific event type and session.
-        Args:
-            session_id: The session identifier (or 'ROOT').
-            event_type: The type of event to handle.
-            handler: The handler function/coroutine.
-        """
-
-        if session_id not in self._event_handlers:
-            self._event_handlers[SessionID(session_id)] = {}
-
-        if event_type not in self._event_handlers[SessionID(session_id)]:
-            self._event_handlers[SessionID(session_id)][event_type] = []
-
-        # Check if handler is already wrapped
-        if not is_async_function(handler):
-            # Only wrap if not already wrapped
-            if not hasattr(handler, '_is_wrapped'):
-                handler = self._wrap_event_handler_as_async(cast(EventHandler, handler))
-
-        self._event_handlers[SessionID(session_id)][event_type].append(
-            cast(AsyncEventHandler, handler)
-        )
-        logger.debug(f"Registered event handler for {event_type} in session {session_id}")
-
-    def unregister_session_handlers(self, session_id: SessionID) -> None:
-        """
-        Unregister all command and event handlers for a specific session.
-        Args:
-            session_id: The session identifier.
-        """
-        command_handlers_removed = 0
-        event_handlers_removed = 0
+        """Register an event handler."""
+        metrics = get_metrics_collector()
         
-        if session_id in self._command_handlers:
-            command_handlers_removed = len(self._command_handlers[session_id])
-            del self._command_handlers[session_id]
-            logger.debug(
-                f"Unregistered {command_handlers_removed} command handlers for session {session_id}"
+        if not is_async_function(handler):
+            handler = self._wrap_sync_event_handler(
+                cast(Callable[[Event], None], handler)
             )
-
-        if session_id in self._event_handlers:
-            event_handlers_removed = sum(
-                len(handlers) for handlers in self._event_handlers[session_id].values()
-            )
-            del self._event_handlers[session_id]
-            logger.debug(
-                f"Unregistered {event_handlers_removed} event handlers for session {session_id}"
-            )
-            
-        if command_handlers_removed == 0 and event_handlers_removed == 0:
-            logger.debug(f"No handlers to unregister for session {session_id}")
-
-    def unregister_command_handler(
-        self, command_type: Type[CommandType], session_id: str = "ROOT"
-    ) -> None:
-        """
-        Unregister a command handler for a specific command type and session.
-        Args:
-            command_type: The type of command.
-            session_id: The session identifier (default 'ROOT').
-        """
-        if session_id in self._command_handlers:
-            if command_type in self._command_handlers[session_id]:
-                del self._command_handlers[session_id][command_type]
-                logger.debug(
-                    f"Unregistered command handler for {command_type} in session {session_id}"
-                )
-        else:
-            raise ValueError(
-                f"No command handlers to unregister for session {session_id}"
-            )
-
-    def unregister_event_handlers(
-        self, event_type: Type[EventType], session_id: SessionID = SessionID("ROOT")
-    ) -> None:
-        """
-        Unregister an event handler for a specific event type and session.
-        Args:
-            event_type: The type of event.
-            session_id: The session identifier (default 'ROOT').
-        """
-        if session_id in self._event_handlers:
-            if event_type in self._event_handlers[session_id]:
-                del self._event_handlers[session_id][event_type]
-                logger.debug(
-                    f"Unregistered event handler for {event_type} in session {session_id}"
-                )
-        else:
-            raise ValueError(f"No event handlers to unregister for session {session_id}")
-
-    # --- Command Execution and Event Publishing ---
-
-    async def execute(self, command: Command) -> CommandResult:
-        """
-        Execute a command and return its result.
-        Args:
-            command: The command instance to execute.
-        Returns:
-            CommandResult: The result of command execution.
-        Raises:
-            ValueError: If no handler is registered for the command type.
-        """
-        command_type = type(command)
-
-        handler = None
-        if command.session_id in self._command_handlers:
-            handler = self._command_handlers[command.session_id].get(command_type)
-
-        # Default to ROOT handlers if no session-specific handler is found
-        if handler is None and SessionID("ROOT") in self._command_handlers:
-            handler = self._command_handlers[SessionID("ROOT")].get(command_type)
-            logger.warning(
-                f"Defaulting to ROOT command handler for {command_type.__name__} in session {command.session_id}"
-            )
-
-        if handler is None:
-            logger.error(
-                f"No handler registered for command type {command_type.__name__}"
-            )
-            raise ValueError(f"No handler registered for command {command_type.__name__}")
-
-        try:
-            logger.info(f"Executing command {command_type.__name__}")
-            await self.publish(
-                CommandStartedEvent(command=command, session_id=command.session_id)
-            )
-            
-            # Execute command with timeout
-            if isinstance(command, ApprovalCommand):
-                result: CommandResult = await asyncio.wait_for(
-                    execute_approval_command(command, handler), 
-                    timeout=self._handler_timeout
+        
+        # Check if registry supports priority
+        if hasattr(self._registry, "register_event_handler"):
+            params = getattr(self._registry.register_event_handler, "__code__", None)
+            if params and "priority" in params.co_varnames:
+                self._registry.register_event_handler(
+                    event_type, cast(AsyncEventHandler, handler), session_id, priority
                 )
             else:
-                result: CommandResult = await asyncio.wait_for(
-                    handler(command), 
-                    timeout=self._handler_timeout
+                self._registry.register_event_handler(
+                    event_type, cast(AsyncEventHandler, handler), session_id
                 )
-            
-            logger.info(f"Command {command_type.__name__} executed successfully")
-            await self.publish(
-                CommandResultEvent(command_result=result, session_id=command.session_id)
+        else:
+            self._registry.register_event_handler(
+                event_type, cast(AsyncEventHandler, handler), session_id
             )
-            return result
-
-        except asyncio.TimeoutError:
-            logger.error(f"Command {command_type.__name__} timed out after {self._handler_timeout} seconds")
-            failed_result = CommandResult(
+        
+        # Update registered handlers gauge
+        total_handlers = sum(
+            len(handlers) 
+            for handlers in getattr(self._registry, "_event_handlers", {}).values()
+        )
+        metrics.set_gauge("registered_handlers", total_handlers)
+    
+    def unregister_session_handlers(self, session_id: SessionID) -> None:
+        """Unregister all handlers for a session."""
+        self._registry.unregister_session(session_id)
+    
+    # --- Middleware and Filters ---
+    
+    def add_command_middleware(self, middleware: HandlerMiddleware) -> None:
+        """Add middleware for command processing."""
+        self._command_middleware.append(middleware)
+        logger.debug(f"Added command middleware: {type(middleware).__name__}")
+    
+    def add_event_middleware(self, middleware: HandlerMiddleware) -> None:
+        """Add middleware for event processing."""
+        self._event_middleware.append(middleware)
+        logger.debug(f"Added event middleware: {type(middleware).__name__}")
+    
+    def add_event_filter(self, filter_func: EventFilter) -> None:
+        """Add a filter for event processing."""
+        self._event_filters.append(filter_func)
+        logger.debug(f"Added event filter: {type(filter_func).__name__}")
+    
+    # --- Command Execution ---
+    
+    async def execute(self, command: Command) -> CommandResult:
+        """Execute a command and return its result."""
+        metrics = get_metrics_collector()
+        command_type = type(command)
+        
+        metrics.inc_counter("commands_sent_total")
+        
+        handler = self._registry.get_command_handler(command_type, command.session_id)
+        if handler is None:
+            error_msg = f"No handler registered for command {command_type.__name__}"
+            logger.error(error_msg)
+            metrics.inc_counter("commands_failed_total")
+            return CommandResult(
                 success=False,
                 command_id=command.command_id,
-                error=f"Handler timeout after {self._handler_timeout} seconds",
-                metadata={"timeout": self._handler_timeout},
+                error=error_msg,
             )
-            await self.publish(CommandResultEvent(command_result=failed_result))
-            return failed_result
+        
+        try:
+            await self.publish(
+                CommandStartedEvent(command=command, session_id=command.session_id),
+                await_processing=False,
+            )
+            
+            with Timer(metrics, "command_processing_duration_seconds"):
+                result = await self._execute_with_middleware(command, handler)
+            
+            if result.success:
+                metrics.inc_counter("commands_processed_total")
+            else:
+                metrics.inc_counter("commands_failed_total")
+            
+            await self.publish(
+                CommandResultEvent(command_result=result, session_id=command.session_id),
+                await_processing=False,
+            )
+            
+            return result
+            
         except Exception as e:
             logger.exception(f"Error executing command {command_type.__name__}: {e}")
+            metrics.inc_counter("commands_failed_total")
             failed_result = CommandResult(
                 success=False,
                 command_id=command.command_id,
                 error=f"{type(e).__name__}: {e!s}",
-                metadata={"exception_details": traceback.format_exc()},
+                metadata={"traceback": traceback.format_exc()},
             )
-            await self.publish(CommandResultEvent(command_result=failed_result))
+            await self.publish(
+                CommandResultEvent(
+                    command_result=failed_result,
+                    session_id=command.session_id
+                ),
+                await_processing=False,
+            )
             return failed_result
-
-    async def publish(self, event: Event, await_processing: bool = True) -> None:
-        """
-        Publish an event onto the event queue.
-        Args:
-            event: The event instance to publish.
-        """
-
-        logger.info(
-            f"Publishing event {type(event).__name__} in session {event.session_id}"
-        )
-
-        try:
-            if self._event_queue is None:
-                raise ValueError("Event queue is not initialized")
-            await self._event_queue.put(event)
-            self._new_event_signal.set()
-            logger.debug(f"Queued event: {type(event).__name__}")
-        except Exception as e:
-            logger.error(f"Error queing event: {e}", exc_info=True)
-        finally:
-            if not isinstance(event, ScheduledEvent) and await_processing:
-                await self.ensure_events_processed()
-
-    async def _process_events(self) -> None:
-        """
-        Process events from the queue indefinitely.
-        Handles each event by dispatching to registered handlers.
-        Uses efficient event-driven waiting and batch processing.
-        """
-        logger.info("Event processing loop starting")
-        BATCH_SIZE = 10  # Process up to 10 events per batch
+    
+    async def _execute_with_middleware(
+        self,
+        command: Command,
+        handler: AsyncCommandHandler,
+    ) -> CommandResult:
+        """Execute command through middleware chain."""
+        if isinstance(command, ApprovalCommand):
+            return await execute_approval_command(command, handler)
         
-        while not self._shutdown_event.is_set():
+        async def execute_handler(cmd: Command, h: AsyncCommandHandler) -> CommandResult:
+            return await h(cmd)
+        
+        chain = execute_handler
+        for middleware in reversed(self._command_middleware):
+            prev_chain = chain
+            async def new_chain(
+                cmd: Command,
+                h: AsyncCommandHandler,
+                m: HandlerMiddleware = middleware,
+                prev: Any = prev_chain,
+            ) -> CommandResult:
+                return await m.process_command(cmd, h, prev)
+            chain = new_chain
+        
+        return await chain(command, handler)
+    
+    # --- Event Publishing ---
+    
+    async def publish(self, event: Event, await_processing: bool = True) -> None:
+        """Publish an event to the bus."""
+        metrics = get_metrics_collector()
+        
+        if self._event_queue is None:
+            logger.warning("Event queue not initialized, event will be lost")
+            return
+        
+        if self._observability:
+            self._observability.observe_event(event)
+        
+        for filter_func in self._event_filters:
+            if not filter_func.should_handle(event, event.session_id):
+                logger.debug(
+                    f"Event {type(event).__name__} filtered out by "
+                    f"{type(filter_func).__name__}"
+                )
+                return
+        
+        await self._event_queue.put(event)
+        metrics.inc_counter("events_published_total")
+        metrics.set_gauge("queue_size", self._event_queue.qsize())
+        
+        if await_processing and not isinstance(event, ScheduledEvent):
+            await self.wait_for_events()
+    
+    async def wait_for_events(self) -> None:
+        """Wait for all current events to be processed."""
+        if self._event_queue is None:
+            return
+        
+        events_to_process = []
+        scheduled_events = []
+        
+        while not self._event_queue.empty():
             try:
-                # Wait for events or shutdown signal
-                if self._event_queue is None or self._event_queue.empty():
-                    await asyncio.wait(
-                        [
-                            asyncio.create_task(self._new_event_signal.wait()),
-                            asyncio.create_task(self._shutdown_event.wait())
-                        ],
-                        return_when=asyncio.FIRST_COMPLETED
-                    )
-                    
-                    # Clear the signal for next iteration
-                    self._new_event_signal.clear()
-                    
-                    # Check if we should shutdown
-                    if self._shutdown_event.is_set():
-                        break
+                event = self._event_queue.get_nowait()
+                if isinstance(event, ScheduledEvent) and event.scheduled_time > datetime.now():
+                    scheduled_events.append(event)
+                else:
+                    events_to_process.append(event)
+            except asyncio.QueueEmpty:
+                break
+        
+        for event in scheduled_events:
+            await self._event_queue.put(event)
+        
+        if events_to_process:
+            await self._process_event_batch(events_to_process)
+    
+    # --- Event Processing ---
+    
+    async def _process_events(self) -> None:
+        """Main event processing loop."""
+        logger.info("Starting event processing loop")
+        
+        while self._running:
+            try:
+                batch = await self._collect_event_batch()
                 
-                # Process events in batches for better performance
-                batch_count = 0
-                events_to_requeue = []
-                next_scheduled_time = None
-                
-                while (not self._event_queue.empty() and 
-                       batch_count < BATCH_SIZE and 
-                       not self._shutdown_event.is_set()):
+                if batch:
+                    await self._process_event_batch(batch)
+                else:
+                    await asyncio.sleep(0.1)
                     
-                    try:
-                        event = await self._event_queue.get()
-                        batch_count += 1
-                        logger.debug(f"Dequeued event {type(event).__name__}")
-
-                        # Check if scheduled event is due
-                        if isinstance(event, ScheduledEvent):
-                            now = datetime.now()
-                            if event.scheduled_time > now:
-                                events_to_requeue.append(event)
-                                # Track the earliest scheduled time for delay calculation
-                                if next_scheduled_time is None or event.scheduled_time < next_scheduled_time:
-                                    next_scheduled_time = event.scheduled_time
-                                logger.debug(f"Event {type(event).__name__} is scheduled for {event.scheduled_time}, will requeue")
-                                continue
-
-                        # Handle the event
-                        try:
-                            await self._handle_event(event)
-                        except Exception:
-                            logger.exception(f"Error processing event {type(event).__name__}")
-                        finally:
-                            self._event_queue.task_done()
-                            
-                    except asyncio.CancelledError:
-                        logger.info("Event processing batch cancelled")
-                        raise
-                
-                # Requeue scheduled events that aren't due yet
-                for event in events_to_requeue:
-                    await self._event_queue.put(event)
-                    self._event_queue.task_done()
-                    
-                # If we have scheduled events, add a small delay to avoid busy waiting
-                if next_scheduled_time:
-                    delay = min(0.1, max(0.01, (next_scheduled_time - datetime.now()).total_seconds()))
-                    if delay > 0:
-                        await asyncio.sleep(delay)
-
             except asyncio.CancelledError:
-                logger.info("Event processing loop cancelled")
-                raise
+                logger.info("Event processing cancelled")
+                break
             except Exception as e:
                 logger.exception(f"Error in event processing loop: {e}")
                 # Brief pause before retrying on error
                 await asyncio.sleep(0.1)
-                
-        logger.info("Event processing loop shutting down")
-
-
-    async def ensure_events_processed(self) -> None:
-        """
-        Ensure all non-scheduled events in the queue are processed.
-        Signals the event processor to wake up and process events.
-        """
+    
+    async def _collect_event_batch(self) -> List[Event]:
+        """Collect events for batch processing."""
         if self._event_queue is None:
-            return
-
-        # Signal the event processor to wake up
-        self._new_event_signal.set()
+            return []
         
-        # Give a brief moment for events to be processed
-        await asyncio.sleep(0.01)
+        batch: List[Event] = []
+        deadline = asyncio.get_event_loop().time() + self._batch_timeout
         
-        # Wait for current events to be processed (with timeout)
-        max_wait = 1.0  # Maximum 1 second wait
-        start_time = asyncio.get_event_loop().time()
-        
-        while (not self._event_queue.empty() and 
-               (asyncio.get_event_loop().time() - start_time) < max_wait):
-            await asyncio.sleep(0.01)
-
-    async def _handle_event(self, event: Event) -> None:
-        """
-        Handle a single event by calling all registered handlers.
-        Args:
-            event: The event instance to handle.
-        """
-        event_type = type(event)
-
-        handlers = []
-        # handle session specific handlers
-        if event.session_id in self._event_handlers and event.session_id != "ROOT":
-            if event_type in self._event_handlers[event.session_id]:
-                session_handlers = self._event_handlers[event.session_id][event_type]
-                if session_handlers:  # Only if there are actually handlers
-                    handlers.extend(session_handlers)  # type: ignore
-
-        # Default to ROOT handlers if no session-specific handler is found
-        if not handlers and event.session_id != "ROOT":
-            # there is no session handlers, so we use ROOT handlers if possible
-            if SessionID("ROOT") in self._event_handlers:
-                # there are root handlers, so we use them
-                if event_type in self._event_handlers[SessionID("ROOT")]:
-                    handlers.extend(self._event_handlers[SessionID("ROOT")][event_type])  # type: ignore
-                    logger.warning(
-                        f"Defaulting to ROOT event handler for {event_type} in session {event.session_id}"
-                    )
-
-        # handle root handlers
-        if event.session_id == "ROOT" and SessionID("ROOT") in self._event_handlers:
-            if event_type in self._event_handlers[SessionID("ROOT")]:
-                handlers.extend(self._event_handlers[SessionID("ROOT")][event_type])  # type: ignore
-
-        # Global handlers handle all events
-        if SessionID("GLOBAL") in self._event_handlers:
-            if event_type in self._event_handlers[SessionID("GLOBAL")]:
-                handlers.extend(self._event_handlers[SessionID("GLOBAL")][event_type])  # type: ignore
-            logger.info(
-                f"Using GLOBAL event handlers {self._event_handlers[SessionID('GLOBAL')]} for {event_type} in session{event.session_id}"
-            )
-
-        if not handlers:
-            logger.debug(
-                f"No non-observability handler registered for event type {event_type}"
-            )
-
-        for handler in self._observability_handlers:
-            logger.debug(
-                f"Dispatching event {event_type} in session {event.session_id} to observability handler {handler.__class__.__name__}"
-            )
+        while len(batch) < self._batch_size and asyncio.get_event_loop().time() < deadline:
             try:
-                await handler.handle(event)
-            except Exception as e:
-                logger.exception(
-                    f"Error in observability handler {handler.__name__}: {e}"
+                timeout = max(0, deadline - asyncio.get_event_loop().time())
+                event = await asyncio.wait_for(
+                    self._event_queue.get(), timeout=timeout
                 )
-                if not self._suppress_event_errors:
-                    raise e
-                else:
-                    self.event_handler_errors.append(e)
-
-        logger.debug(
-            f"Dispatching event {event_type} in session {event.session_id} to {len(handlers)} handlers"  # type: ignore
-        )
-        # Create timeout-wrapped tasks for handlers
-        timeout_tasks = [
-            asyncio.create_task(asyncio.wait_for(handler(event), timeout=self._handler_timeout))
-            for handler in handlers
-        ]
-        results = await asyncio.gather(*timeout_tasks, return_exceptions=True)  # type: ignore
-        for i, result in enumerate(results):  # type: ignore
-            if isinstance(result, Exception):
-                self.event_handler_errors.append(result)
-                handler_name = getattr(handlers[i], "__qualname__", repr(handlers[i]))  # type: ignore
                 
-                if isinstance(result, asyncio.TimeoutError):
-                    logger.error(
-                        f"Handler '{handler_name}' for {event_type} timed out after {self._handler_timeout} seconds"
-                    )
-                else:
-                    logger.exception(
-                        f"Error in handler '{handler_name}' for {event_type}: {result}"
-                    )
-                    
-                if not self._suppress_event_errors:
-                    raise result
-                else:
-                    await self.publish(
-                        EventHandlerFailedEvent(
-                            event=event, handler=handler_name, exception=result
-                        )
-                    )
-
-    def _wrap_event_handler_as_async(self, handler: EventHandler) -> AsyncEventHandler:
-        async def async_wrapper(event: Event):
-            return handler(event)
-
-        async_wrapper.function = handler  # type: ignore[attr-defined]
-        async_wrapper._is_wrapped = True  # type: ignore[attr-defined]
-
-        return async_wrapper
-
-    def _wrap_command_handler_as_async(
-        self, handler: CommandHandler
-    ) -> AsyncCommandHandler:
-        async def async_wrapper(command: Command):
-            return handler(command)
-
-        async_wrapper.function = handler  # type: ignore[attr-defined]
-        async_wrapper._is_wrapped = True  # type: ignore[attr-defined]
-
-        return async_wrapper
-
-    async def _dump_queue(self) -> None:
-        """
-        Dump the event queue to a file.
-        """
+                if isinstance(event, ScheduledEvent):
+                    if event.scheduled_time > datetime.now():
+                        await self._event_queue.put(event)
+                        continue
+                
+                batch.append(event)
+                
+            except asyncio.TimeoutError:
+                break
+        
+        return batch
+    
+    async def _process_event_batch(self, batch: List[Event]) -> None:
+        """Process a batch of events."""
+        tasks = []
+        
+        for event in batch:
+            event_type = type(event)
+            handlers = self._registry.get_event_handlers(event_type, event.session_id)
+            
+            if not handlers:
+                logger.debug(
+                    f"No handlers for {event_type.__name__} in session {event.session_id}"
+                )
+                continue
+            
+            for handler in handlers:
+                task = asyncio.create_task(
+                    self._handle_event_with_middleware(event, handler)
+                )
+                tasks.append((task, event, handler))
+        
+        if tasks:
+            results = await asyncio.gather(
+                *[task for task, _, _ in tasks],
+                return_exceptions=True
+            )
+            
+            for i, result in enumerate(results):
+                if isinstance(result, Exception):
+                    _, event, handler = tasks[i]
+                    await self._handle_event_error(event, handler, result)
+    
+    async def _handle_event_with_middleware(
+        self,
+        event: Event,
+        handler: AsyncEventHandler,
+    ) -> None:
+        """Handle event through middleware chain."""
+        metrics = get_metrics_collector()
+        
+        async def execute_handler(evt: Event, h: AsyncEventHandler) -> None:
+            with Timer(metrics, "event_processing_duration_seconds"):
+                await h(evt)
+            metrics.inc_counter("events_processed_total")
+        
+        chain = execute_handler
+        for middleware in reversed(self._event_middleware):
+            prev_chain = chain
+            async def new_chain(
+                evt: Event,
+                h: AsyncEventHandler,
+                m: HandlerMiddleware = middleware,
+                prev: Any = prev_chain,
+            ) -> None:
+                await m.process_event(evt, h, prev)
+            chain = new_chain
+        
+        await chain(event, handler)
+    
+    async def _handle_event_error(
+        self,
+        event: Event,
+        handler: AsyncEventHandler,
+        error: Exception,
+    ) -> None:
+        """Handle errors from event handlers."""
+        metrics = get_metrics_collector()
+        metrics.inc_counter("events_failed_total")
+        
+        self.event_handler_errors.append(error)
+        handler_name = getattr(handler, "__qualname__", repr(handler))
+        
+        logger.exception(
+            f"Error in handler '{handler_name}' for {type(event).__name__}: {error}"
+        )
+        
+        if not self._suppress_event_errors:
+            raise error
+        
+        await self.publish(
+            EventHandlerFailedEvent(
+                event=event,
+                handler=handler_name,
+                exception=error,
+                session_id=event.session_id,
+            ),
+            await_processing=False,
+        )
+    
+    # --- Session Management ---
+    
+    def create_session(self, session_id: Optional[str] = None) -> BusSession:
+        """Create a new bus session."""
+        return BusSession(id=session_id)
+    
+    @asynccontextmanager
+    async def session(self, session_id: Optional[str] = None) -> AsyncIterator[BusSession]:
+        """Create a session as an async context manager."""
+        session = self.create_session(session_id)
+        await session.start()
+        try:
+            yield session
+        finally:
+            await session.end()
+    
+    # --- Configuration ---
+    
+    def set_observability_manager(self, observability: ObservabilityManager) -> None:
+        """Set the observability manager."""
+        self._observability = observability
+    
+    def suppress_event_errors(self) -> None:
+        """Suppress errors during event handling."""
+        self._suppress_event_errors = True
+    
+    def unsuppress_event_errors(self) -> None:
+        """Do not suppress errors during event handling."""
+        self._suppress_event_errors = False
+    
+    def set_batch_processing(self, batch_size: int, batch_timeout: float) -> None:
+        """Configure batch processing parameters."""
+        self._batch_size = max(1, batch_size)
+        self._batch_timeout = max(0.001, batch_timeout)
+    
+    # --- Persistence ---
+    
+    async def _save_scheduled_events(self) -> None:
+        """Save scheduled events to persistent storage."""
         if self._event_queue is None:
             return
         
-        events : List[ScheduledEvent] = []
+        scheduled_events: List[ScheduledEvent] = []
+        temp_events: List[Event] = []
+        
         while not self._event_queue.empty():
-            event = await self._event_queue.get() # type: ignore
-            if isinstance(event, ScheduledEvent):
-                events.append(event)
-        save_unfinished_events(events)
-
-    async def _load_queue(self) -> None:
-        """
-        Load the event queue from a file.
-        """
+            try:
+                event = self._event_queue.get_nowait()
+                if isinstance(event, ScheduledEvent):
+                    scheduled_events.append(event)
+                else:
+                    temp_events.append(event)
+            except asyncio.QueueEmpty:
+                break
+        
+        if scheduled_events:
+            save_unfinished_events(scheduled_events)
+            logger.info(f"Saved {len(scheduled_events)} scheduled events")
+        
+        for event in temp_events:
+            await self._event_queue.put(event)
+    
+    async def _load_scheduled_events(self) -> None:
+        """Load scheduled events from persistent storage."""
         if self._event_queue is None:
             return
-        events : List[ScheduledEvent] = get_and_delete_unfinished_events()
+        
+        events = get_and_delete_unfinished_events()
         for event in events:
-            await self._event_queue.put(event) # type: ignore
+            await self._event_queue.put(event)
+        
+        if events:
+            logger.info(f"Loaded {len(events)} scheduled events")
+    
+    # --- Metrics Access ---
+    
+    async def get_metrics(self) -> Dict[str, Any]:
+        """Get current bus metrics."""
+        metrics = get_metrics_collector()
+        return await metrics.get_metrics()
+    
+    # --- Helper Methods ---
+    
+    def _wrap_sync_command_handler(
+        self, handler: Callable[[Command], CommandResult]
+    ) -> AsyncCommandHandler:
+        """Wrap a sync command handler as async."""
+        async def async_wrapper(command: Command) -> CommandResult:
+            return handler(command)
+        
+        async_wrapper.function = handler  # type: ignore[attr-defined]
+        return async_wrapper
+    
+    def _wrap_sync_event_handler(
+        self, handler: Callable[[Event], None]
+    ) -> AsyncEventHandler:
+        """Wrap a sync event handler as async."""
+        async def async_wrapper(event: Event) -> None:
+            handler(event)
+        
+        async_wrapper.function = handler  # type: ignore[attr-defined]
+        return async_wrapper
+    
+    # --- Statistics ---
+    
+    async def get_stats(self) -> Dict[str, Any]:
+        """Get message bus statistics."""
+        registry_stats = {}
+        if hasattr(self._registry, "get_handler_stats"):
+            # Check if the method is async
+            method = getattr(self._registry, "get_handler_stats")
+            if asyncio.iscoroutinefunction(method):
+                registry_stats = await method()
+            else:
+                registry_stats = method()
+        
+        return {
+            "running": self._running,
+            "queue_size": self._event_queue.qsize() if self._event_queue else 0,
+            "batch_size": self._batch_size,
+            "batch_timeout": self._batch_timeout,
+            "error_suppression": self._suppress_event_errors,
+            "total_errors": len(self.event_handler_errors),
+            **registry_stats,
+        }
 
-    async def get_events(self, session_id: SessionID) -> List[Event]:
-        """
-        Get all events for a session without removing them from the queue.
-        """
-
-        async with asyncio.Lock():
-            
-            if self._event_queue is None:
-                return []
-            
-            events: List[Event] = []
-            temp_events: List[Event] = []
-            
-            # Get all events from the queue temporarily
-            while not self._event_queue.empty():
-                event = await self._event_queue.get()
-                temp_events.append(event)
-                if event.session_id == session_id:
-                    events.append(event)
-            
-            # Put all events back into the queue
-            for event in temp_events:
-                await self._event_queue.put(event)
-            
-        return events
 
 def bus_exception_hook(bus: MessageBus) -> None:
-    """
-    Allows the bus to cleanup when an exception is raised globally.
-    """
-    def bus_excepthook(exc_type: Type[BaseException], exc_value: BaseException, exc_traceback: TracebackType) -> None:
+    """Install exception hook that stops the bus on uncaught exceptions."""
+    import sys
+    import traceback
+    
+    def excepthook(exc_type: Type[BaseException], exc_value: BaseException, exc_traceback: Any) -> None:
         logger.info("Global unhandled exception caught by bus excepthook!")
         traceback.print_exception(exc_type, exc_value, exc_traceback)
         
         try:
-            # Try to get the current event loop
             loop = asyncio.get_event_loop()
             if loop.is_running():
-                # If loop is running, create a task to stop the bus
                 loop.create_task(bus.stop())
             else:
-                # If loop is not running, run the stop method
                 loop.run_until_complete(bus.stop())
         except RuntimeError:
-            # No event loop available, try to create one
             try:
                 loop = asyncio.new_event_loop()
                 asyncio.set_event_loop(loop)
@@ -742,6 +696,6 @@ def bus_exception_hook(bus: MessageBus) -> None:
             except Exception as e:
                 print(f"Failed to cleanup bus: {e}")
         
-        # Exit the program
         sys.exit(1)
-    sys.excepthook = bus_excepthook
+    
+    sys.excepthook = excepthook

@@ -1,15 +1,14 @@
 """File handler for logging events to JSONL."""
 
 import asyncio
-from datetime import datetime
 import json
 import logging
 import os
-from pathlib import Path
-import time
-from typing import Any, Dict, Optional
-from enum import Enum
 from dataclasses import asdict
+from datetime import datetime
+from enum import Enum
+from pathlib import Path
+from typing import Any, Dict, Optional
 
 from llmgine.messages.events import Event
 from llmgine.observability.handlers.base import ObservabilityEventHandler

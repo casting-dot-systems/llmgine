@@ -1,6 +1,7 @@
 import asyncio
 from datetime import datetime, timedelta
 import sys
+import pytest
 from llmgine.bus.bus import MessageBus, bus_exception_hook
 from llmgine.messages import ScheduledEvent, Event
 
@@ -12,6 +13,7 @@ def scheduled_event_handler(event: Event):
 def regular_event_handler(event: Event):
     print(f"Handled regular event at {datetime.now().isoformat()}")
 
+@pytest.mark.asyncio
 async def test_scheduled_events_are_processed():
     bus = MessageBus()
     await bus.start()
@@ -31,6 +33,7 @@ async def test_scheduled_events_are_processed():
     await asyncio.sleep(6)
     await bus.stop()
 
+@pytest.mark.asyncio
 async def test_scheduled_events_and_regular_events_are_processed():
     bus = MessageBus()
     await bus.start()
@@ -61,6 +64,8 @@ async def create_scheduled_event(bus: MessageBus, scheduled_time: datetime) -> N
     event = ScheduledEvent(scheduled_time=scheduled_time)
     await bus.publish(event)
 
+@pytest.mark.asyncio
+@pytest.mark.skip(reason="Test intentionally raises exception")
 async def test_scheduled_events_with_exception():
     bus = MessageBus()
     bus_exception_hook(bus)
@@ -88,6 +93,8 @@ async def test_scheduled_events_with_exception():
     # Raise an exception to test the excepthook
     raise RuntimeError("Test exception to trigger cleanup")
 
+@pytest.mark.asyncio
+@pytest.mark.skip(reason="Test intentionally calls sys.exit(1)")
 async def test_scheduled_events_with_kill():
     bus = MessageBus()
     bus_exception_hook(bus)

@@ -1,5 +1,0 @@
-
-
-I want to setup a python demo which can send and recieve email with gmail. 
-It should be able to use callback functions when an email is recieved.
-There should be a simple python demo for this.

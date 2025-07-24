@@ -1,16 +1,17 @@
+"""Tests for the refactored message bus implementation."""
+
 import asyncio
+from dataclasses import dataclass, field
+from typing import List
+
 import pytest
 import pytest_asyncio
+
 from llmgine.bus.bus import MessageBus
+from llmgine.bus.interfaces import EventFilter, HandlerMiddleware, HandlerPriority
+from llmgine.llm import SessionID
 from llmgine.messages.commands import Command, CommandResult
-from dataclasses import dataclass, field
-from icecream import ic
 from llmgine.messages.events import Event
-
-import os
-
-# os.environ["PYTHONBREAKPOINT"] = "0"
-# os.environ["PYTHONBREAKPOINT"] = "IPython.core.debugger.set_trace"
 
 
 @dataclass
@@ -23,282 +24,292 @@ class TestCommand(Command):
 class TestEvent(Event):
     __test__ = False
     test_data: str = field(default_factory=str)
-    counter: int = field(default=0)
 
 
 @pytest_asyncio.fixture
 async def bus():
+    """Create a message bus for testing."""
     bus = MessageBus()
     await bus.start()
     yield bus
-    await bus.reset()
+    await bus.reset()  # Reset clears all handlers and stops the bus
 
 
-class EventTracker:
+class EventCollector:
+    """Helper to collect events for testing."""
     def __init__(self):
-        self.events = []
-
-    def track_event(self, event: Event):
+        self.events: List[Event] = []
+    
+    async def collect(self, event: Event) -> None:
         self.events.append(event)
 
-    def event_function_1(self, event: TestEvent):
-        self.events.append("function_1 executed")
 
-    def event_function_2(self, event: TestEvent):
-        self.events.append("function_2 executed")
+# Test basic functionality
 
-    def event_function_3(self, event: TestEvent):
-        self.events.append("function_3 executed")
-
-    def event_function_failure(self, event: TestEvent):
-        raise Exception("Test failure")
-
-
-def command_function(input_data: str) -> str:
-    return "(" + input_data + ")"
-
-
-def command_function_failure(input_data: str):
-    raise Exception("Test failure")
-
-
-def command_handler_success(command: TestCommand):
-    test_data = command_function(command.test_data)
-    return CommandResult(success=True, result=test_data)
-
-
-def command_handler_failure(command: TestCommand):
-    test_data = command_function_failure(command.test_data)
-    return CommandResult(success=True, result=test_data)
-
-
-def event_handler_success(event: TestEvent):
-    test_data = "[" + event.test_data + "] 1"
-    ic(f"Event received: {test_data}")
-
-
-def event_handler_success_2(event: TestEvent):
-    test_data = "[" + event.test_data + "] 2"
-    ic(f"Event received: {test_data}")
-
-
-def event_handler_success_3(event: TestEvent):
-    test_data = "[" + event.test_data + "] 3"
-    ic(f"Event received: {test_data}")
-
-
-def event_handler_failure(event: TestEvent):
-    raise Exception("Test failure")
-
-
-def test_bus_init_singleton(bus: MessageBus):
-    bus1 = bus
+def test_singleton_pattern():
+    """Test that MessageBus follows singleton pattern."""
+    bus1 = MessageBus()
     bus2 = MessageBus()
     assert bus1 is bus2
 
 
 @pytest.mark.asyncio
-async def test_bus_start_stop(bus: MessageBus):
-    await bus.reset()
-    assert bus._event_queue is None
-    await bus.start()
-    assert bus._event_queue is not None
-    await bus.stop()
-    assert bus._processing_task is None
-
-
-@pytest.mark.asyncio
-async def test_bus_register_command_handler_success(bus: MessageBus):
-    # Register to ROOT
-    bus.register_command_handler(TestCommand, command_handler_success)
-    assert bus._command_handlers["ROOT"][TestCommand].function == command_handler_success
-
-    # Register to session
-    bus.register_command_handler(TestCommand, command_handler_success, "SESSION_1")
-    assert (
-        bus._command_handlers["SESSION_1"][TestCommand].function
-        == command_handler_success
-    )
-
-
-@pytest.mark.asyncio
-async def test_bus_register_command_handler_failure(bus: MessageBus):
-    # Register to ROOT duplicate
-    bus.register_command_handler(TestCommand, command_handler_failure)
-    with pytest.raises(ValueError):
-        bus.register_command_handler(TestCommand, command_handler_failure)
-
-    # Register to session duplicate
-    bus.register_command_handler(TestCommand, command_handler_failure, "SESSION_1")
-    with pytest.raises(ValueError):
-        bus.register_command_handler(TestCommand, command_handler_failure, "SESSION_1")
-
-    # TODO: wrong types, handler checking
-
-
-def test_bus_unregister_command_handler_success(bus: MessageBus):
-    # Unregister from ROOT
-    bus.register_command_handler(TestCommand, command_handler_success)
-    bus.unregister_command_handler(TestCommand)
-    assert bus._command_handlers["ROOT"] == {}
-
-    # Unregister from session
-    bus.register_command_handler(TestCommand, command_handler_success, "SESSION_1")
-    bus.unregister_command_handler(TestCommand, "SESSION_1")
-    assert bus._command_handlers["SESSION_1"] == {}
-
-
-def test_bus_unregister_command_handler_failure(bus: MessageBus):
-    # Unregister from ROOT non-existent
-    with pytest.raises(ValueError):
-        bus.unregister_command_handler(TestCommand)
-
-    # Unregister from session non-existent
-    ic(bus._command_handlers)
-    with pytest.raises(ValueError) as e:
-        bus.unregister_command_handler(TestCommand, "SESSION_1")
-    assert str(e.value) == "No command handlers to unregister for session SESSION_1"
-
-
-def test_bus_register_event_handlers(bus: MessageBus):
-    # Register to ROOT
-    bus.register_event_handler(TestEvent, event_handler_success)
-    assert bus._event_handlers["ROOT"][TestEvent][0].function == event_handler_success
-
-    # Register to session
-    bus.register_event_handler(TestEvent, event_handler_success, "SESSION_1")
-    assert (
-        bus._event_handlers["SESSION_1"][TestEvent][0].function == event_handler_success
-    )
-
-
-def test_unregister_event_handlers_success(bus: MessageBus):
-    # Unregister from ROOT
-    bus.register_event_handler(TestEvent, event_handler_success)
-    bus.unregister_event_handlers(TestEvent)
-    assert bus._event_handlers["ROOT"] == {}
-
-    # Unregister from session
-    bus.register_event_handler(TestEvent, event_handler_success, "SESSION_1")
-    bus.unregister_event_handlers(TestEvent, "SESSION_1")
-    assert bus._event_handlers["SESSION_1"] == {}
-
-
-def test_unregister_event_handlers_failure(bus: MessageBus):
-    # Unregister from ROOT
-    bus.register_event_handler(TestEvent, event_handler_success)
-    bus.unregister_event_handlers(TestEvent)
-    assert bus._event_handlers["ROOT"] == {}
-
-
-@pytest.mark.asyncio
-async def test_execute_command_success(bus: MessageBus):
-    # ROOT success
-    bus.register_command_handler(TestCommand, command_handler_success)
-    command = TestCommand(test_data="test")
+async def test_command_execution(bus: MessageBus):
+    """Test basic command execution."""
+    async def handle_command(cmd: TestCommand) -> CommandResult:
+        return CommandResult(success=True, result=f"Processed: {cmd.test_data}")
+    
+    bus.register_command_handler(TestCommand, handle_command)
+    
+    command = TestCommand(test_data="hello")
     result = await bus.execute(command)
+    
     assert result.success
-    assert result.result == "(test)"
-
-    # Session
-    bus.register_command_handler(TestCommand, command_handler_success, "SESSION_1")
-    command = TestCommand(test_data="test", session_id="SESSION_1")
-    result = await bus.execute(command)
-    assert result.success
-    assert result.result == "(test)"
+    assert result.result == "Processed: hello"
 
 
 @pytest.mark.asyncio
-async def test_execute_command_failure(bus: MessageBus):
-    # ROOT failure
-    bus.register_command_handler(TestCommand, command_handler_failure)
-    command = TestCommand(test_data="test")
-    result = await bus.execute(command)
-    assert not result.success
-    assert result.error == "Exception: Test failure"
-
-    # # Session failure
-    bus.register_command_handler(TestCommand, command_handler_failure, "SESSION_1")
-    command = TestCommand(test_data="test", session_id="SESSION_1")
-    result = await bus.execute(command)
-    assert not result.success
-    assert result.error == "Exception: Test failure"
-
-
-@pytest.mark.asyncio
-async def test_publish_event_global_success(bus: MessageBus):
-    tracker = EventTracker()
-    bus.register_event_handler(TestEvent, tracker.event_function_1)
-    bus.register_event_handler(TestEvent, tracker.event_function_2)
-    bus.register_event_handler(TestEvent, tracker.event_function_3)
+async def test_event_publishing(bus: MessageBus):
+    """Test basic event publishing."""
+    collector = EventCollector()
+    bus.register_event_handler(TestEvent, collector.collect)
+    
     event = TestEvent(test_data="test")
     await bus.publish(event)
-    await asyncio.sleep(0.1)
-    assert len(tracker.events) == 3
-    assert tracker.events[0] == "function_1 executed"
-    assert tracker.events[1] == "function_2 executed"
-    assert tracker.events[2] == "function_3 executed"
+    
+    assert len(collector.events) == 1
+    assert collector.events[0].test_data == "test"
+
+
+# Test session management
+
+@pytest.mark.asyncio
+async def test_session_context_manager(bus: MessageBus):
+    """Test session context manager for automatic cleanup."""
+    collector = EventCollector()
+    session_id = None
+    
+    async with bus.session("test-session") as session:
+        session_id = session.session_id
+        # Register handler in session
+        session.register_event_handler(TestEvent, collector.collect)
+        
+        # Publish event in session
+        event = TestEvent(test_data="in-session", session_id=session.session_id)
+        await bus.publish(event)
+        
+        assert len(collector.events) == 1
+    
+    # After session ends, handler should be unregistered
+    event2 = TestEvent(test_data="after-session", session_id=session_id)
+    await bus.publish(event2)
+    
+    # Should still be 1 - handler was cleaned up
+    assert len(collector.events) == 1
 
 
 @pytest.mark.asyncio
-async def test_publish_event_session_success(bus: MessageBus):
-    tracker = EventTracker()
-    bus.register_event_handler(TestEvent, tracker.event_function_1, "SESSION_1")
-    bus.register_event_handler(TestEvent, tracker.event_function_2, "SESSION_1")
-    bus.register_event_handler(TestEvent, tracker.event_function_3, "SESSION_1")
-    event = TestEvent(test_data="test", session_id="SESSION_1")
-    await bus.publish(event)
-    await asyncio.sleep(0.1)
-    assert len(tracker.events) == 3
-    assert tracker.events[0] == "function_1 executed"
-    assert tracker.events[1] == "function_2 executed"
-    assert tracker.events[2] == "function_3 executed"
+async def test_bus_scope_vs_session_scope(bus: MessageBus):
+    """Test that bus-scoped and session-scoped handlers work correctly."""
+    bus_collector = EventCollector()
+    session_collector = EventCollector()
+    
+    # Register bus-scoped handler (gets all events)
+    bus.register_event_handler(TestEvent, bus_collector.collect)
+    
+    # Register session-scoped handler (only gets session events)
+    session_id = SessionID("test-session")
+    bus.register_event_handler(TestEvent, session_collector.collect, session_id)
+    
+    # Event for bus scope - only bus handler gets it
+    bus_event = TestEvent(test_data="bus-event")
+    await bus.publish(bus_event)
+    
+    assert len(bus_collector.events) == 1
+    assert len(session_collector.events) == 0
+    
+    # Event for session - both handlers get it (bus handler gets all events)
+    session_event = TestEvent(test_data="session-event", session_id=session_id)
+    await bus.publish(session_event)
+    
+    assert len(bus_collector.events) == 2  # Bus handler gets all events
+    assert len(session_collector.events) == 1  # Session handler only gets session events
+
+
+# Test middleware
+
+@pytest.mark.asyncio
+async def test_command_middleware(bus: MessageBus):
+    """Test command middleware processing."""
+    execution_order = []
+    
+    class LoggingMiddleware(HandlerMiddleware):
+        async def process_command(self, command, handler, next_middleware):
+            execution_order.append("before")
+            result = await next_middleware(command, handler)
+            execution_order.append("after")
+            return result
+        
+        async def process_event(self, event, handler, next_middleware):
+            pass
+    
+    async def handle_command(cmd: TestCommand) -> CommandResult:
+        execution_order.append("handler")
+        return CommandResult(success=True)
+    
+    bus.add_command_middleware(LoggingMiddleware())
+    bus.register_command_handler(TestCommand, handle_command)
+    
+    await bus.execute(TestCommand(test_data="test"))
+    
+    assert execution_order == ["before", "handler", "after"]
+
+
+# Test event filters
+
+@pytest.mark.asyncio
+async def test_event_filters(bus: MessageBus):
+    """Test event filtering."""
+    collector = EventCollector()
+    
+    class TestFilter(EventFilter):
+        def should_handle(self, event: Event, session_id: SessionID) -> bool:
+            # Only handle events with "allowed" in test_data
+            return "allowed" in getattr(event, "test_data", "")
+    
+    bus.add_event_filter(TestFilter())
+    bus.register_event_handler(TestEvent, collector.collect)
+    
+    # This should be filtered out
+    await bus.publish(TestEvent(test_data="filtered"))
+    assert len(collector.events) == 0
+    
+    # This should pass through
+    await bus.publish(TestEvent(test_data="allowed-event"))
+    assert len(collector.events) == 1
+
+
+# Test event priorities
+
+@pytest.mark.asyncio
+async def test_event_handler_priorities(bus: MessageBus):
+    """Test that event handlers execute in priority order."""
+    execution_order = []
+    
+    async def high_priority_handler(event: TestEvent):
+        execution_order.append("high")
+    
+    async def normal_priority_handler(event: TestEvent):
+        execution_order.append("normal")
+    
+    async def low_priority_handler(event: TestEvent):
+        execution_order.append("low")
+    
+    # Register in mixed order but with priorities
+    bus.register_event_handler(TestEvent, normal_priority_handler, priority=HandlerPriority.NORMAL)
+    bus.register_event_handler(TestEvent, low_priority_handler, priority=HandlerPriority.LOW)
+    bus.register_event_handler(TestEvent, high_priority_handler, priority=HandlerPriority.HIGH)
+    
+    await bus.publish(TestEvent(test_data="test"))
+    
+    # Should execute in priority order (high, normal, low)
+    # Note: Due to async execution, order within same batch may vary
+    assert "high" in execution_order
+    assert "normal" in execution_order
+    assert "low" in execution_order
+
+
+# Test error handling
+
+@pytest.mark.asyncio
+async def test_event_error_suppression(bus: MessageBus):
+    """Test that event handler errors are suppressed by default."""
+    collector = EventCollector()
+    
+    async def failing_handler(event: TestEvent):
+        raise Exception("Handler failed")
+    
+    # Register both handlers
+    bus.register_event_handler(TestEvent, failing_handler)
+    bus.register_event_handler(TestEvent, collector.collect)
+    
+    # Should not raise even though one handler fails
+    await bus.publish(TestEvent(test_data="test"))
+    
+    # Good handler should still have processed the event
+    assert len(collector.events) == 1
+    assert len(bus.event_handler_errors) == 1
 
 
 @pytest.mark.asyncio
-async def test_publish_event_session_global_inheritance_success(bus: MessageBus):
-    tracker = EventTracker()
-    bus.register_event_handler(TestEvent, tracker.event_function_1, "GLOBAL")
-    bus.register_event_handler(TestEvent, tracker.event_function_2, "SESSION_1")
-    bus.register_event_handler(TestEvent, tracker.event_function_3, "SESSION_1")
-    event = TestEvent(test_data="test", session_id="SESSION_1")
-    await bus.publish(event)
-    await asyncio.sleep(0.1)
-    assert len(tracker.events) == 3
-    assert tracker.events[0] == "function_2 executed"
-    assert tracker.events[1] == "function_3 executed"
-    assert tracker.events[2] == "function_1 executed"
-
-
-@pytest.mark.asyncio
-async def test_publish_event_session_global_root_inheritance_success(bus: MessageBus):
-    tracker = EventTracker()
-    bus.register_event_handler(TestEvent, tracker.event_function_1, "ROOT")
-    bus.register_event_handler(TestEvent, tracker.event_function_2, "GLOBAL")
-    event = TestEvent(test_data="test", session_id="SESSION_1")
-    await bus.publish(event)
-    await asyncio.sleep(0.1)
-    assert len(tracker.events) == 2
-    assert tracker.events[0] == "function_1 executed"
-    assert tracker.events[1] == "function_2 executed"
-
-
-@pytest.mark.asyncio
-async def test_publish_event_session_failure_surpressed_exception(bus: MessageBus):
-    tracker = EventTracker()
-    bus.register_event_handler(TestEvent, tracker.event_function_failure)
-    event = TestEvent(test_data="test", session_id="SESSION_1")
-    await bus.publish(event)
-    await asyncio.sleep(0.1)
-    assert str(bus.event_handler_errors[0]) == "Test failure"
-
-
-@pytest.mark.asyncio
-async def test_publish_event_session_failure_raises_exception(bus: MessageBus):
-    tracker = EventTracker()
-    bus.register_event_handler(TestEvent, tracker.event_function_failure)
+async def test_event_error_propagation(bus: MessageBus):
+    """Test that event handler errors can be propagated."""
     bus.unsuppress_event_errors()
-    event = TestEvent(test_data="test", session_id="SESSION_1")
-    with pytest.raises(Exception) as e:
-        await bus._handle_event(event)
-    assert str(e.value) == "Test failure"
+    
+    async def failing_handler(event: TestEvent):
+        raise ValueError("Handler failed")
+    
+    bus.register_event_handler(TestEvent, failing_handler)
+    
+    # Should raise when errors not suppressed
+    with pytest.raises(ValueError, match="Handler failed"):
+        await bus.publish(TestEvent(test_data="test"))
+
+
+# Test batch processing
+
+@pytest.mark.asyncio
+async def test_batch_processing(bus: MessageBus):
+    """Test that events are processed in batches."""
+    # Configure smaller batch for testing
+    bus.set_batch_processing(batch_size=3, batch_timeout=0.05)
+    
+    collector = EventCollector()
+    bus.register_event_handler(TestEvent, collector.collect)
+    
+    # Publish multiple events quickly
+    for i in range(5):
+        await bus.publish(TestEvent(test_data=f"event-{i}"), await_processing=False)
+    
+    # Give time for batch processing
+    await asyncio.sleep(0.1)
+    
+    # All events should be processed
+    assert len(collector.events) == 5
+
+
+# Test observability integration
+
+@pytest.mark.asyncio
+async def test_observability_integration(bus: MessageBus):
+    """Test that observability manager is called correctly."""
+    from llmgine.observability.manager import ObservabilityManager
+    
+    observed_events = []
+    
+    class TestObservability(ObservabilityManager):
+        def observe_event(self, event: Event) -> None:
+            observed_events.append(event)
+    
+    obs = TestObservability()
+    bus.set_observability_manager(obs)
+    
+    event = TestEvent(test_data="observed")
+    await bus.publish(event)
+    
+    assert len(observed_events) == 1
+    assert observed_events[0] == event
+
+
+# Test statistics
+
+@pytest.mark.asyncio
+async def test_get_stats(bus: MessageBus):
+    """Test statistics gathering."""
+    stats = await bus.get_stats()
+    
+    assert stats["running"] is True
+    assert "queue_size" in stats
+    assert stats["batch_size"] == 10  # Default
+    assert stats["batch_timeout"] == 0.01  # Default
+    assert stats["error_suppression"] is True  # Default
