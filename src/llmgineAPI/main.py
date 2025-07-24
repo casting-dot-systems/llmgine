@@ -1,8 +1,9 @@
 """
-FastAPI app initialization and configuration with extensibility support.
+FastAPI app initialization and configuration with extensibility and messaging support.
 
 This module provides both a default app instance and factory functions
-for creating customized apps with project-specific extensions.
+for creating customized apps with project-specific extensions and
+server-initiated messaging capabilities.
 """
 
 from typing import Any, Optional
@@ -10,11 +11,16 @@ from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 import time
 from datetime import datetime
+import atexit
 
 from llmgineAPI.config import config_manager, APIConfig
 from llmgineAPI.core.extensibility import ExtensibleAPIFactory
-from llmgineAPI.routers import sessions, websocket
-from llmgineAPI.routers.dependencies import get_session_service, get_engine_service
+from llmgineAPI.routers import websocket
+from llmgineAPI.services.engine_service import EngineService
+from llmgineAPI.services.session_service import SessionService
+from llmgineAPI.websocket.connection_registry import get_connection_registry
+from llmgineAPI.core.messaging_api import MessagingAPIWithEvents
+from llmgineAPI.services.connection_service import get_connection_service
 
 
 def create_app(
@@ -22,14 +28,14 @@ def create_app(
     api_factory: Optional[ExtensibleAPIFactory] = None
 ) -> FastAPI:
     """
-    Create a FastAPI application with optional customizations.
+    Create a FastAPI application with optional customizations and messaging support.
     
     Args:
         config: Custom configuration (uses defaults if None)
         api_factory: Factory with custom extensions (optional)
         
     Returns:
-        Configured FastAPI application
+        Configured FastAPI application with server messaging capabilities
     """
     
     # Use provided config or load from config manager
@@ -53,17 +59,42 @@ def create_app(
         allow_headers=config.cors_headers,
     )
     
-    # Store API factory in app state for access by routers
+    # Initialize messaging infrastructure
+    connection_registry = get_connection_registry()
+    messaging_api = MessagingAPIWithEvents(connection_registry)
+    connection_service = get_connection_service()
+    
+    # Store components in app state for access by routers and custom code
     app.state.api_factory = api_factory
+    app.state.connection_registry = connection_registry
+    app.state.messaging_api = messaging_api
+    app.state.connection_service = connection_service
+    
+    # Initialize messaging API with factory if provided
+    if api_factory:
+        api_factory._set_messaging_api(messaging_api)
     
     # Include core routers
-    app.include_router(sessions.router)
     app.include_router(websocket.router)
     
     # Include custom routers if provided
     if api_factory:
         for custom_router in api_factory.custom_routers:
             app.include_router(custom_router)
+    
+    # Register cleanup on app shutdown
+    @app.on_event("shutdown")
+    async def cleanup_on_shutdown():
+        """Clean up resources when app shuts down."""
+        try:
+            # Cancel any pending messaging requests
+            messaging_api.cancel_pending_requests("Application shutdown")
+            
+            # Clean up stale connections
+            await connection_service.cleanup_stale_connections(max_idle_seconds=0)
+            
+        except Exception as e:
+            print(f"Error during shutdown cleanup: {e}")
     
     # Root endpoint with dynamic metadata
     @app.get("/")
@@ -102,9 +133,8 @@ def create_app(
     async def readiness_check(): # type: ignore
         """Readiness check - indicates if the service is ready to handle requests."""
         try:
-            session_service = get_session_service()
-            engine_service = get_engine_service()
-            
+            session_service = SessionService()
+            engine_service = EngineService()
             
             # Check if monitor threads are running
             if not session_service.monitor_thread.is_alive():
@@ -112,6 +142,9 @@ def create_app(
                 
             if not engine_service.monitor_thread.is_alive():
                 raise HTTPException(status_code=503, detail="Engine monitor thread not running")
+            
+            # Get messaging system health
+            health_info = connection_service.get_health_summary()
             
             return {
                 "status": "ready",
@@ -126,6 +159,12 @@ def create_app(
                         "initialized": True,
                         "monitor_running": engine_service.monitor_thread.is_alive(),
                         "count": len(engine_service.engines)
+                    },
+                    "websocket_connections": {
+                        "initialized": True,
+                        "total_connections": health_info["total_connections"],
+                        "total_sessions": health_info["total_sessions"],
+                        "pending_server_requests": health_info.get("pending_server_requests", 0)
                     }
                 }
             }
@@ -155,6 +194,16 @@ def create_app(
                 "max_sessions": config.max_sessions,
                 "session_timeout": config.session_timeout,
                 "websocket_heartbeat_interval": config.websocket_heartbeat_interval
+            },
+            "messaging": {
+                "server_messaging_enabled": True,
+                "connection_registry_available": True,
+                "features": [
+                    "server_initiated_messages",
+                    "request_response_mapping", 
+                    "connection_event_callbacks",
+                    "broadcast_messaging"
+                ]
             }
         }
         
@@ -162,6 +211,22 @@ def create_app(
             info["extensions"] = api_factory.get_api_metadata()
         
         return info
+    
+    @app.get("/api/connections")
+    async def connection_info(): # type: ignore
+        """Get information about active WebSocket connections."""
+        health_info = connection_service.get_health_summary()
+        return {
+            "summary": health_info,
+            "connected_apps": connection_service.get_connected_apps(),
+            "messaging_capabilities": {
+                "send_to_app": True,
+                "send_to_session": True,
+                "broadcast": True,
+                "request_response": True,
+                "event_callbacks": True
+            }
+        }
     
     return app
 

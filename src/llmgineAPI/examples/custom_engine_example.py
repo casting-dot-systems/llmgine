@@ -8,70 +8,66 @@ to create custom message types and handlers for their specific engine.
 from typing import Optional, Dict, Any
 from fastapi import WebSocket
 import uvicorn
+from pydantic import BaseModel
 
 from llmgineAPI.models.websocket import WSMessage, WSResponse
 from llmgineAPI.websocket.base import BaseHandler
 from llmgineAPI.core.extensibility import (
-    CustomMessageMixin, 
     ExtensibleAPIFactory, 
     EngineConfiguration
 )
-from llmgine.llm import SessionID
+
 
 
 # 1. Define custom message types
-class TranslateRequest(WSMessage, CustomMessageMixin):
+class TranslateRequest(WSMessage):
     """Custom message for translation requests."""
-    
-    def __init__(self, text: str, target_language: str, source_language: str = "auto"):
-        super().__init__(
-            type="translate",
-            data={
-                "text": text,
-                "target_language": target_language,
-                "source_language": source_language
-            }
-        )
+    class TranslateRequestData(BaseModel):
+        text: str
+        target_language: str
+        source_language: str = "auto"
+
+    type: str = "translate"
+    message_id: str
+    data: TranslateRequestData
+
 
 
 class TranslateResponse(WSResponse):
     """Custom response for translation results."""
     
-    def __init__(self, original_text: str, translated_text: str, detected_language: Optional[str] = None):
-        super().__init__(
-            type="translate_res",
-            data={
-                "original_text": original_text,
-                "translated_text": translated_text,
-                "detected_language": detected_language
-            }
-        )
+    class TranslateResponseData(BaseModel):
+        original_text: str
+        translated_text: str
+        detected_language: Optional[str] = None
+
+    type: str = "translate_res"
+    message_id: str
+    data: TranslateResponseData
 
 
-class AnalyzeTextRequest(WSMessage, CustomMessageMixin):
+class AnalyzeTextRequest(WSMessage):
     """Custom message for text analysis requests."""
     
-    def __init__(self, text: str, analysis_types: list[str]):
-        super().__init__(
-            type="analyze_text",
-            data={
-                "text": text,
-                "analysis_types": analysis_types  # e.g., ["sentiment", "entities", "summary"]
-            }
-        )
+    class AnalyzeTextRequestData(BaseModel):
+        text: str
+        analysis_types: list[str]
+
+    type: str = "analyze_text"
+    message_id: str
+    data: AnalyzeTextRequestData
 
 
 class AnalyzeTextResponse(WSResponse):
     """Custom response for text analysis results."""
     
-    def __init__(self, text: str, analysis_results: Dict[str, Any]):
-        super().__init__(
-            type="analyze_text_res",
-            data={
-                "text": text,
-                "analysis_results": analysis_results
-            }
-        )
+    class AnalyzeTextResponseData(BaseModel):
+        text: str
+        analysis_results: Dict[str, Any]
+
+    type: str = "analyze_text_res"
+    message_id: str
+    data: AnalyzeTextResponseData
 
 
 # 2. Define custom handlers
@@ -88,25 +84,20 @@ class TranslateHandler(BaseHandler):
     
     async def handle(
         self, 
-        message: WSMessage, 
+        message: Dict[str, Any], 
         websocket: WebSocket, 
-        session_id: SessionID
     ) -> Optional[WSResponse]:
         """Handle translation request."""
-        # Extract data from message
-        text = message.data["text"]
-        target_lang = message.data["target_language"]
-        source_lang = message.data.get("source_language", "auto")
-        
-        # TODO: Implement actual translation logic here
-        # For demo purposes, we'll just return a mock translation
-        translated_text = f"[{target_lang.upper()}] {text}"
-        detected_language = "en" if source_lang == "auto" else source_lang
+
         
         return TranslateResponse(
-            original_text=text,
-            translated_text=translated_text,
-            detected_language=detected_language
+            type="translate_res",
+            message_id=message["message_id"],
+            data=TranslateResponse.TranslateResponseData(
+                original_text=message["data"]["text"],
+                translated_text=message["data"]["target_language"],
+                detected_language=message["data"]["source_language"]
+            )
         )
 
 
@@ -123,36 +114,18 @@ class AnalyzeTextHandler(BaseHandler):
     
     async def handle(
         self, 
-        message: WSMessage, 
+        message: Dict[str, Any], 
         websocket: WebSocket, 
-        session_id: SessionID
     ) -> Optional[WSResponse]:
         """Handle text analysis request."""
-        text = message.data["text"]
-        analysis_types = message.data["analysis_types"]
-        
-        # TODO: Implement actual analysis logic here
-        # For demo purposes, return mock analysis results
-        analysis_results: Dict[str, Any] = {}
-        
-        if "sentiment" in analysis_types:
-            analysis_results["sentiment"] = {
-                "score": 0.8,
-                "label": "positive",
-                "confidence": 0.95
-            }
-        
-        if "entities" in analysis_types:
-            analysis_results["entities"] = [
-                {"text": "example", "label": "MISC", "start": 0, "end": 7}
-            ]
-        
-        if "summary" in analysis_types:
-            analysis_results["summary"] = f"Summary of: {text[:50]}..."
         
         return AnalyzeTextResponse(
-            text=text,
-            analysis_results=analysis_results
+            type="analyze_text_res",
+            message_id=message["message_id"],
+            data=AnalyzeTextResponse.AnalyzeTextResponseData(
+                text=message["data"]["text"],
+                analysis_results=message["data"]["analysis_types"]
+            )
         )
 
 

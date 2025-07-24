@@ -2,7 +2,7 @@
 WebSocket message models for the LLMGine API.
 
 This module defines Pydantic models for WebSocket communication
-including request/response models and error handling.
+including request/response models, server-initiated messages, and error handling.
 
 Usage:
     Basic WebSocket message structure:
@@ -19,7 +19,7 @@ Usage:
         "data": { ... }
     }
 
-    Creating custom messages:
+    Creating custom client messages:
     ```python
     class CustomRequest(WSMessage):
         def __init__(self, custom_field: str, message_id: Optional[str] = None):
@@ -38,26 +38,44 @@ Usage:
             )
     ```
 
+    Creating custom server-initiated messages:
+    ```python
+    class CustomServerMessage(ServerMessage, ServerInitiatedMixin):
+        def __init__(self, custom_data: str, message_id: Optional[str] = None):
+            super().__init__(
+                type="custom_server_message",
+                message_id=message_id or str(uuid.uuid4()),
+                data={"custom_data": custom_data}
+            )
+    ```
+
 Request-Response Mapping:
     Each request generates a unique message_id (UUID4) if not provided.
     The corresponding response includes the same message_id for mapping.
     Frontend applications can use this to match responses to requests.
 
 Message Types:
-    - ping: Test WebSocket connection
-    - status: Get session status
-    - create_session: Create a new session
+    Client-Initiated:
+        - ping: Test WebSocket connection
+        - status: Get session status
+        - create_session: Create a new session
+    
+    Server-Initiated:
+        - server_request: Generic server request requiring response
+        - notification: Fire-and-forget server notification
+        - server_ping: Server-initiated ping
 
 Error Handling:
     All errors return WSError with error code and message.
     WebSocket connections are automatically closed on critical errors.
 
-Applications can create new request and response models by extending the WSMessage and WSResponse classes.
+Applications can create new request and response models by extending the appropriate base classes.
 """
 
 from typing import Any, Dict, Optional, Union
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from enum import Enum
+import uuid
 
 class WSErrorCode(Enum):
     """WebSocket error codes."""
@@ -83,6 +101,100 @@ class WSResponse(BaseModel):
     type: str
     message_id: str
     data: Any
+
+
+# ---------------------------------------------- Server-Initiated Message Classes ----------------------------------------------
+class ServerMessage(BaseModel):
+    """Base class for server-initiated messages."""
+    type: str
+    message_id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    data: Any
+    server_initiated: bool = Field(default=True, description="Indicates this message was initiated by the server")
+
+
+class ServerInitiatedMixin:
+    """
+    Mixin class for creating custom server-initiated messages.
+    
+    This mixin provides a marker for messages that are initiated by the server
+    and can be used for type checking and routing.
+    """
+    server_initiated: bool = True
+
+
+class NotificationMessage(ServerMessage):
+    """
+    Fire-and-forget notification message from server to client.
+    
+    This message type does not expect a response.
+    """
+    def __init__(self, notification_type: str, message: str, data: Optional[Dict[str, Any]] = None, message_id: Optional[str] = None):
+        super().__init__(
+            type="notification",
+            message_id=message_id or str(uuid.uuid4()),
+            data={
+                "notification_type": notification_type,
+                "message": message,
+                "additional_data": data or {}
+            }
+        )
+
+
+class ServerRequest(ServerMessage):
+    """
+    Server-initiated request that expects a response from the client.
+    
+    The client should respond with a ServerResponse containing the same message_id.
+    """
+    def __init__(self, request_type: str, data: Dict[str, Any], message_id: Optional[str] = None):
+        super().__init__(
+            type="server_request",
+            message_id=message_id or str(uuid.uuid4()),
+            data={
+                "request_type": request_type,
+                **data
+            }
+        )
+
+
+class ServerResponse(WSResponse):
+    """
+    Response to a server-initiated request.
+    
+    This is sent by the client in response to a ServerRequest.
+    """
+    def __init__(self, response_type: str, data: Dict[str, Any], message_id: str):
+        super().__init__(
+            type="server_response",
+            message_id=message_id,
+            data={
+                "response_type": response_type,
+                **data
+            }
+        )
+
+
+class ServerPing(ServerMessage):
+    """Server-initiated ping to test connection health."""
+    def __init__(self, timestamp: str, message_id: Optional[str] = None):
+        super().__init__(
+            type="server_ping",
+            message_id=message_id or str(uuid.uuid4()),
+            data={"timestamp": timestamp}
+        )
+
+
+class ServerPongResponse(WSResponse):
+    """Response to server-initiated ping."""
+    def __init__(self, timestamp: str, server_timestamp: str, message_id: str):
+        super().__init__(
+            type="server_pong",
+            message_id=message_id,
+            data={
+                "timestamp": timestamp,
+                "server_timestamp": server_timestamp
+            }
+        )
 
 
 # ---------------------------------------------- Request Models ----------------------------------------------
@@ -181,5 +293,21 @@ WSResponseMessage = Union[
     ConnectedResponse,
     StatusResponse,
     CreateSessionResponse,
+    ServerResponse,
+    ServerPongResponse,
     WSError
+]
+
+# Server-initiated message types
+ServerInitiatedMessage = Union[
+    ServerRequest,
+    NotificationMessage,
+    ServerPing,
+]
+
+# All message types (for comprehensive validation)
+AllWSMessages = Union[
+    WSRequestMessage,
+    WSResponseMessage,
+    ServerInitiatedMessage,
 ]
