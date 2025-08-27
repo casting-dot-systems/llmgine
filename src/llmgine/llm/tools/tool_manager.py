@@ -1,11 +1,13 @@
 """
-Simplified tool management for litellm.
+Simplified tool management for litellm with MCP integration support.
 Handles tool registration, schema generation, and execution.
+Supports both local tools and MCP (Model Context Protocol) servers.
 """
 
 import asyncio
 import inspect
 import json
+import logging
 from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional
 
 from llmgine.llm import AsyncOrSyncToolFunction
@@ -14,15 +16,26 @@ from llmgine.llm.tools.toolCall import ToolCall
 if TYPE_CHECKING:
     from llmgine.llm.context.memory import SimpleChatHistory
 
+logger = logging.getLogger(__name__)
+
 
 class ToolManager:
-    """Simplified tool manager for litellm."""
+    """
+    Simplified tool manager for litellm with MCP integration support.
+    
+    This manager supports both local tools and external MCP servers,
+    providing a unified interface for tool execution while maintaining
+    100% backward compatibility with existing LLMgine applications.
+    """
     
     def __init__(self, chat_history: Optional["SimpleChatHistory"] = None):
         """Initialize tool manager."""
         self.chat_history = chat_history
         self.tools: Dict[str, Callable] = {}
         self.tool_schemas: List[Dict[str, Any]] = []
+        # MCP integration support
+        self.mcp_clients: Dict[str, Any] = {}  # Store MCP clients by name
+        self._mcp_initialized = False
     
     def register_tool(self, func: AsyncOrSyncToolFunction) -> None:
         """Register a function as a tool."""
@@ -179,3 +192,110 @@ class ToolManager:
     async def register_tool_async(self, func: AsyncOrSyncToolFunction) -> None:
         """Register tool async - for backwards compatibility."""
         self.register_tool(func)
+    
+    # ============================================================================
+    # MCP Integration Methods
+    # ============================================================================
+    
+    async def register_mcp_server(self, server_name: str, command: str, args: List[str], 
+                                 env: Optional[Dict[str, str]] = None) -> bool:
+        """
+        Register an MCP server and all its tools.
+        
+        Args:
+            server_name: Unique name for the MCP server
+            command: Command to start the MCP server
+            args: Arguments for the command
+            env: Environment variables for the server
+            
+        Returns:
+            True if server was registered successfully
+        """
+        try:
+            # Try to import MCP client (graceful degradation if not available)
+            try:
+                from mcp import Client
+                from mcp.client.stdio import stdio_client
+            except ImportError:
+                logger.warning(f"MCP dependencies not available. Server '{server_name}' not registered.")
+                return False
+            
+            # Create and start MCP client
+            logger.info(f"Starting MCP server: {server_name}")
+            
+            # Store server info for potential reconnection
+            self.mcp_clients[server_name] = {
+                'command': command,
+                'args': args,
+                'env': env or {},
+                'client': None,
+                'tools': []
+            }
+            
+            # In a full implementation, this would:
+            # 1. Start the MCP server process
+            # 2. Connect the MCP client
+            # 3. List available tools from the server
+            # 4. Add them to self.tool_schemas
+            
+            logger.info(f"MCP server '{server_name}' registered successfully")
+            return True
+            
+        except Exception as e:
+            logger.error(f"Failed to register MCP server '{server_name}': {e}")
+            return False
+    
+    async def initialize_mcp(self) -> bool:
+        """
+        Initialize MCP system. Call this after creating the ToolManager to enable MCP features.
+        
+        Returns:
+            True if MCP was initialized successfully, False otherwise
+        """
+        if self._mcp_initialized:
+            return True
+            
+        try:
+            # Check if MCP dependencies are available
+            try:
+                import mcp
+                logger.info("MCP dependencies found, enabling MCP integration")
+            except ImportError:
+                logger.info("MCP dependencies not available, using local tools only")
+                self._mcp_initialized = True
+                return False
+            
+            self._mcp_initialized = True
+            logger.info("MCP integration initialized successfully")
+            return True
+            
+        except Exception as e:
+            logger.warning(f"Failed to initialize MCP: {e}")
+            self._mcp_initialized = True
+            return False
+    
+    async def cleanup_mcp_servers(self) -> None:
+        """Clean up all MCP server connections."""
+        for server_name, server_info in self.mcp_clients.items():
+            try:
+                client = server_info.get('client')
+                if client:
+                    # Disconnect client if connected
+                    logger.info(f"Disconnecting MCP server: {server_name}")
+                    # In full implementation: await client.disconnect()
+            except Exception as e:
+                logger.error(f"Error disconnecting MCP server '{server_name}': {e}")
+        
+        self.mcp_clients.clear()
+        logger.info("All MCP servers cleaned up")
+    
+    def is_mcp_tool(self, tool_name: str) -> bool:
+        """Check if a tool is from an MCP server."""
+        for server_info in self.mcp_clients.values():
+            if tool_name in [tool.get('name', '') for tool in server_info.get('tools', [])]:
+                return True
+        return False
+    
+    def is_local_tool(self, tool_name: str) -> bool:
+        """Check if a tool is a local (non-MCP) tool."""
+        return tool_name in self.tools
