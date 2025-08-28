@@ -1,7 +1,7 @@
 # 🌌 **LLMgine**
 
 LLMgine is a _pattern-driven_ framework for building **production-grade, tool-augmented LLM applications** in Python.  
-It offers a clean separation between _**engines**_ (conversation logic), _**models/providers**_ (LLM back-ends), _**tools**_ (function calling), a streaming **message-bus** for commands & events, and opt-in **observability**.  
+It offers a clean separation between _**engines**_ (conversation logic), _**models/providers**_ (LLM back-ends), _**tools**_ (function calling with **MCP support**), a streaming **message-bus** for commands & events, and opt-in **observability**.  
 Think _FastAPI_ for web servers or _Celery_ for tasks—LLMgine plays the same role for complex, chat-oriented AI.
 
 ---
@@ -11,7 +11,7 @@ Think _FastAPI_ for web servers or _Celery_ for tasks—LLMgine plays the same r
 |------|--------------|-----------|
 | **Engines** | Plug-n-play `Engine` subclasses (`SinglePassEngine`, `ToolChatEngine`, …) with session isolation, tool-loop orchestration, and CLI front-ends | `engines/*.py`, `src/llmgine/llm/engine/` |
 | **Message Bus** | Async **command bus** (1 handler) + **event bus** (N listeners) + **sessions** for scoped handlers | `src/llmgine/bus/` |
-| **Tooling** | Declarative function-to-tool registration, multi-provider JSON-schema parsing (OpenAI, Claude, DeepSeek), async execution pipeline | `src/llmgine/llm/tools/` |
+| **Tooling** | Declarative function-to-tool registration, multi-provider JSON-schema parsing (OpenAI, Claude, DeepSeek), async execution pipeline, **MCP integration** for external tool servers | `src/llmgine/llm/tools/` |
 | **Providers / Models** | Wrapper classes for OpenAI, OpenRouter, Gemini 2.5 Flash etc. _without locking you in_ | `src/llmgine/llm/providers/`, `src/llmgine/llm/models/` |
 | **Unified Interface** | Single API for OpenAI, Anthropic, and Gemini - switch providers by changing model name | `src/llmgine/unified/` |
 | **Context Management** | Simple and in-memory chat history managers, event-emitting for retrieval/update | `src/llmgine/llm/context/` |
@@ -31,7 +31,8 @@ flowchart TD
     Obs["Observability<br/>Handlers"]
     Eng["Engine(s)"]
     TM["ToolManager"]
-    Tools["Your&nbsp;Tools"]
+    Tools["Local Tools"]
+    MCP["MCP Servers"]
     Session["BusSession"]
     CLI["CLI / UI"]
 
@@ -46,7 +47,9 @@ flowchart TD
     Eng -- tool_calls --> TM
 
     TM -- executes --> Tools
+    TM -. "MCP Protocol" .-> MCP
     Tools -- ToolResult --> CLI
+    MCP -. "External Tools" .-> CLI
 
     Session --> CLI
 ```
@@ -63,7 +66,7 @@ flowchart TD
 git clone https://github.com/your-org/llmgine.git
 cd llmgine
 python -m venv .venv && source .venv/bin/activate
-pip install -e ".[openai]"   # extras: openai, openrouter, dev, …
+pip install -e ".[openai]"   # extras: openai, openrouter, mcp, dev, …
 export OPENAI_API_KEY="sk-…" # or OPENROUTER_API_KEY / GEMINI_API_KEY
 ```
 
@@ -111,7 +114,9 @@ await chat.main()
 
 ---
 
-## 🔧 Registering Tools in 3 Lines
+## 🔧 Tool Integration
+
+### Local Tools in 3 Lines
 
 ```python
 from llmgine.llm.tools.tool import Parameter
@@ -134,6 +139,37 @@ The engine now follows the **OpenAI function-calling loop**:
 User → Engine → LLM (asks to call get_weather) → ToolManager → get_weather()
           ↑                                        ↓
           └───────────    context update   ────────┘ (loops until no tool calls)
+```
+
+### MCP (Model Context Protocol) Integration
+
+Connect to external tool servers using the MCP protocol:
+
+```python
+from llmgine.llm.tools.tool_manager import ToolManager
+
+# Initialize tool manager with MCP support
+tool_manager = ToolManager()
+
+# Register an MCP server (e.g., Notion integration)
+await tool_manager.register_mcp_server(
+    server_name="notion",
+    command="python",
+    args=["/path/to/notion_mcp_server.py"]
+)
+
+# MCP tools are now available alongside local tools
+```
+
+**MCP Features:**
+- 🔌 **External Tool Servers**: Connect to any MCP-compatible tool server
+- 🔄 **Dynamic Loading**: Tools are discovered and loaded at runtime
+- 🎯 **Provider Agnostic**: Works with OpenAI, Anthropic, and Gemini tool formats
+- ⚡ **Graceful Degradation**: Falls back silently if MCP dependencies unavailable
+
+**Prerequisites:**
+```bash
+pip install mcp  # Optional: for MCP integration
 ```
 
 ---
@@ -206,7 +242,7 @@ Comprehensive documentation is available in the [`docs/`](docs/) directory:
 
 ### Component Documentation
 - **[Message Bus](src/llmgine/bus/README.md)** - Event and command bus architecture
-- **[Tools System](src/llmgine/llm/tools/README.md)** - Function calling and tool registration
+- **[Tools System](src/llmgine/llm/tools/README.md)** - Function calling, tool registration, and MCP integration
 - **[Observability System](src/llmgine/observability/README.md)** - Standalone observability architecture
 - **[Observability CLI](programs/observability-cli/README.md)** - CLI monitoring tool
 - **[Observability GUI](programs/observability-gui/README.md)** - React-based monitoring interface
@@ -226,7 +262,7 @@ llmgine/
    │   ├─ engine/      # Engine base + dummy
    │   ├─ models/      # Provider-agnostic model wrappers
    │   ├─ providers/   # OpenAI, OpenRouter, Gemini, Dummy, …
-   │   └─ tools/       # ToolManager, parser, register, types
+   │   └─ tools/       # ToolManager, parser, register, types, MCP integration
    ├─ observability/   # Console & file handlers, log events
    └─ ui/cli/          # Rich-based CLI components
 ```
