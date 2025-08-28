@@ -40,6 +40,7 @@ from llmgine.bus.registry_simple import HandlerRegistry
 from llmgine.bus.metrics import Timer, get_metrics_collector
 from llmgine.bus.session import BusSession
 from llmgine.bus.utils import is_async_function
+from llmgine.bus.default_handler import get_default_handler, DefaultEventHandler
 from llmgine.database.database import get_and_delete_unfinished_events, save_unfinished_events
 from llmgine.llm import SessionID
 from llmgine.messages.approvals import ApprovalCommand, execute_approval_command
@@ -120,6 +121,9 @@ class MessageBus(IMessageBus):
         # Performance settings
         self._batch_size = 10
         self._batch_timeout = 0.01
+        
+        # Default handler for unhandled events
+        self._default_handler = get_default_handler()
         
         self._initialized = True
         logger.info("MessageBus initialized")
@@ -278,9 +282,10 @@ class MessageBus(IMessageBus):
         command_type = type(command)
         
         metrics.inc_counter("commands_sent_total")
-        
+        print(f"Executing command: {command_type.__name__}")
         handler = self._registry.get_command_handler(command_type, command.session_id)
         if handler is None:
+            print(f"No handler registered for command {command_type.__name__}")
             error_msg = f"No handler registered for command {command_type.__name__}"
             logger.error(error_msg)
             metrics.inc_counter("commands_failed_total")
@@ -297,7 +302,9 @@ class MessageBus(IMessageBus):
             )
             
             with Timer(metrics, "command_processing_duration_seconds"):
+                print(f"Executing command with middleware: {command_type.__name__}")
                 result = await self._execute_with_middleware(command, handler)
+                print(f"Command result: {result}")
             
             if result.success:
                 metrics.inc_counter("commands_processed_total")
@@ -469,6 +476,11 @@ class MessageBus(IMessageBus):
                 logger.debug(
                     f"No handlers for {event_type.__name__} in session {event.session_id}"
                 )
+                # Use default handler for unhandled events
+                task = asyncio.create_task(
+                    self._default_handler.handle_unhandled_event(event)
+                )
+                tasks.append((task, event, "default_handler"))
                 continue
             
             for handler in handlers:
@@ -486,7 +498,13 @@ class MessageBus(IMessageBus):
             for i, result in enumerate(results):
                 if isinstance(result, Exception):
                     _, event, handler = tasks[i]
-                    await self._handle_event_error(event, handler, result)
+                    # Handle error differently for default handler
+                    if handler == "default_handler":
+                        logger.error(
+                            f"Error in default handler for {type(event).__name__}: {result}"
+                        )
+                    else:
+                        await self._handle_event_error(event, handler, result)
     
     async def _handle_event_with_middleware(
         self,
@@ -661,6 +679,11 @@ class MessageBus(IMessageBus):
             else:
                 registry_stats = method()
         
+        # Get default handler stats
+        default_handler_stats = {
+            "unhandled_events_count": self._default_handler.get_unhandled_events_count(),
+        }
+        
         return {
             "running": self._running,
             "queue_size": self._event_queue.qsize() if self._event_queue else 0,
@@ -668,8 +691,17 @@ class MessageBus(IMessageBus):
             "batch_timeout": self._batch_timeout,
             "error_suppression": self._suppress_event_errors,
             "total_errors": len(self.event_handler_errors),
+            "default_handler": default_handler_stats,
             **registry_stats,
         }
+    
+    def get_default_handler(self) -> DefaultEventHandler:
+        """Get the default handler instance for direct access.
+        
+        Returns:
+            The default event handler instance
+        """
+        return self._default_handler
 
 
 def bus_exception_hook(bus: MessageBus) -> None:

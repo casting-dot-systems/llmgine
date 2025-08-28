@@ -1,15 +1,17 @@
 # LLMGine API Module
 
-This module provides a **WebSocket-only, extensible FastAPI-based API** designed to serve as a foundation for LLMGine-based applications. The API module is designed to be imported and extended by other projects that use LLMGine as their core engine.
+This module provides a **WebSocket-only, extensible FastAPI-based API** with **bidirectional messaging capabilities** designed to serve as a foundation for LLMGine-based applications. The API module is designed to be imported and extended by other projects that use LLMGine as their core engine.
 
 ## 🎯 Design Philosophy
 
 The API module serves as a **complementary library** to the core LLMGine module, providing:
 
 - **WebSocket-first architecture** for real-time communication
+- **Bidirectional messaging** with server-initiated requests and notifications
 - **App-based session management** with automatic cleanup
-- **Request-response mapping** for frontend applications
+- **Request-response mapping** using Futures for async operations
 - **Extensible message system** for custom functionality
+- **Framework integration API** for custom backends
 - **Type-safe communication** with full Pydantic validation
 - **Thread-safe operations** with proper resource management
 
@@ -19,43 +21,47 @@ The API module serves as a **complementary library** to the core LLMGine module,
 src/llmgineAPI/
 ├── core/                   # Extensibility framework
 │   ├── extensibility.py    # Base classes for custom extensions
+│   ├── messaging_api.py    # Server messaging API for custom backends
 │   └── __init__.py
 ├── config.py              # Configuration system
 ├── examples/               # Usage examples for other projects
 │   ├── custom_engine_example.py
 │   └── __init__.py
-├── main.py                # FastAPI app with WebSocket support
+├── main.py                # FastAPI app with messaging infrastructure
 ├── models/                # Pydantic models
-│   ├── websocket.py       # WebSocket message schemas with message IDs
+│   ├── websocket.py       # WebSocket message schemas with server messages
 │   ├── sessions.py        # Session management models
 │   └── responses.py       # Standard response models
 ├── routers/               # FastAPI routers
-│   └── websocket.py       # WebSocket-only endpoint
+│   └── websocket.py       # WebSocket-only endpoint with connection registry
 ├── services/              # Business logic services
 │   ├── session_service.py # Session lifecycle management
-│   └── engine_service.py  # Engine lifecycle management
+│   ├── engine_service.py  # Engine lifecycle management
+│   └── connection_service.py # WebSocket connection management
 ├── utils/                 # Utility functions
 └── websocket/             # WebSocket infrastructure
-    ├── base.py            # Base handler classes
+    ├── base.py            # Base handler classes with server messaging
     ├── handlers.py        # Core message handlers
-    └── registry.py        # Handler registration system
+    ├── registry.py        # Handler registration system
+    └── connection_registry.py # Connection tracking and management
 ```
 
-## 🔧 WebSocket-Only Communication
+## 🔧 Bidirectional WebSocket Communication
 
 ### Connection Flow
 
 1. **Connect**: Client connects to `/api/ws`
 2. **App Registration**: Server assigns unique `app_id` and sends connection confirmation
 3. **Session Management**: Frontend creates sessions associated with the `app_id`
-4. **Message Exchange**: All communication happens through structured WebSocket messages
-5. **Cleanup**: On disconnect, all sessions and engines are automatically cleaned up
+4. **Bidirectional Messaging**: Both client and server can initiate messages
+5. **Future-Based Responses**: Server can send requests and wait for responses using asyncio Futures
+6. **Cleanup**: On disconnect, all sessions, engines, and pending requests are automatically cleaned up
 
 ### Message Protocol
 
 All WebSocket messages follow this structure with request-response mapping:
 
-**Request Format:**
+**Client-Initiated Request Format:**
 ```json
 {
   "type": "message_type",
@@ -66,7 +72,20 @@ All WebSocket messages follow this structure with request-response mapping:
 }
 ```
 
-**Response Format:**
+**Server-Initiated Message Format:**
+```json
+{
+  "type": "server_request",
+  "message_id": "server-generated-uuid",
+  "server_initiated": true,
+  "data": {
+    "request_type": "user_input",
+    "prompt": "Please enter your name"
+  }
+}
+```
+
+**Response Format (works for both directions):**
 ```json
 {
   "type": "response_type",
@@ -93,7 +112,9 @@ When a WebSocket connects, the server automatically sends:
 }
 ```
 
-#### Create Session
+#### Client-Initiated Messages
+
+**Create Session:**
 ```json
 // Request
 {
@@ -114,7 +135,7 @@ When a WebSocket connects, the server automatically sends:
 }
 ```
 
-#### Ping/Pong
+**Ping/Pong:**
 ```json
 // Request
 {
@@ -135,26 +156,69 @@ When a WebSocket connects, the server automatically sends:
 }
 ```
 
-#### Session Status
+#### Server-Initiated Messages
+
+**Server Request (with response expected):**
 ```json
-// Request
+// Server sends
 {
-  "type": "status",
-  "message_id": "client-uuid",
+  "type": "server_request",
+  "message_id": "server-uuid",
+  "server_initiated": true,
   "data": {
-    "session_id": "session-uuid"
+    "request_type": "user_confirmation",
+    "message": "Do you want to proceed?",
+    "options": ["yes", "no"]
   }
 }
 
-// Response
+// Client responds
 {
-  "type": "status_res",
-  "message_id": "client-uuid",
+  "type": "server_response",
+  "message_id": "server-uuid",
   "data": {
-    "session_id": "session-uuid",
-    "status": "running",
-    "created_at": "2024-01-01T12:00:00.000Z",
-    "last_interaction_at": "2024-01-01T12:05:00.000Z"
+    "response_type": "user_confirmation",
+    "selection": "yes"
+  }
+}
+```
+
+**Server Notification (fire-and-forget):**
+```json
+{
+  "type": "notification",
+  "message_id": "server-uuid",
+  "server_initiated": true,
+  "data": {
+    "notification_type": "process_complete",
+    "message": "Your file has been processed successfully",
+    "additional_data": {
+      "file_id": "abc123",
+      "download_url": "/api/files/abc123"
+    }
+  }
+}
+```
+
+**Server Ping:**
+```json
+// Server sends
+{
+  "type": "server_ping",
+  "message_id": "server-uuid",
+  "server_initiated": true,
+  "data": {
+    "timestamp": "2024-01-01T12:00:00.000Z"
+  }
+}
+
+// Client responds
+{
+  "type": "server_pong",
+  "message_id": "server-uuid",
+  "data": {
+    "timestamp": "2024-01-01T12:00:00.000Z",
+    "server_timestamp": "2024-01-01T12:00:00.001Z"
   }
 }
 ```
@@ -185,38 +249,43 @@ All errors return a standardized format:
 - `VALIDATION_ERROR` - Message validation failed
 - `WEBSOCKET_ERROR` - Internal WebSocket error
 
-## 🌟 App-Based Session Management
+## 🌟 Connection Registry & Resource Management
 
-### Static App Mapping
+### Connection Registry System
 
-The API maintains a static dictionary mapping `app_id` to multiple `session_id`s:
+The API uses a sophisticated connection registry for tracking WebSocket connections:
 
 ```python
-# Thread-safe static mapping shared across all WebSocket connections
-_app_session_mapping: Dict[str, Set[SessionID]] = {}
+# Thread-safe connection registry with metadata
+@dataclass
+class ConnectionMetadata:
+    app_id: str
+    websocket: WebSocket
+    session_ids: Set[SessionID]
+    connected_at: datetime
+    last_activity: datetime
 ```
 
-### Automatic Cleanup
+### Automatic Resource Management
 
 When a WebSocket disconnects, the system automatically:
 
-1. **Finds all sessions** associated with the `app_id`
-2. **Stops and deletes engines** linked to those sessions
-3. **Unregisters session handlers** from the message bus
-4. **Deletes sessions** from the session service
-5. **Removes app mapping** from the static dictionary
+1. **Cancels pending server requests** using Future cancellation
+2. **Finds all sessions** associated with the `app_id`
+3. **Stops and deletes engines** linked to those sessions
+4. **Unregisters session handlers** from the message bus
+5. **Deletes sessions** from the session service
+6. **Removes connection** from the registry
+7. **Triggers cleanup callbacks** for custom backends
 
 ### Thread Safety
 
-All operations on the app mapping use `RLock` for thread safety:
+All operations use proper locking mechanisms:
+- Connection registry operations use `RLock`
+- Pending request management is atomic
+- Session and engine cleanup is synchronized
 
-```python
-def register_session_to_app(app_id: str, session_id: SessionID) -> None:
-    with _app_mapping_lock:
-        # Thread-safe session registration
-```
-
-## 🔧 How Other Projects Use This API
+## 🔧 Framework Integration for Custom Backends
 
 ### 1. **Basic Usage (Default WebSocket API)**
 
@@ -230,112 +299,147 @@ if __name__ == "__main__":
     uvicorn.run(app, host="0.0.0.0", port=8000)
 ```
 
-### 2. **Extended Usage (Custom Message API)**
+### 2. **Extended Usage with Server Messaging**
 
 ```python
 # In your project's main.py
 from llmgineAPI.main import create_app
 from llmgineAPI.config import APIConfig
-from llmgineAPI.core.extensibility import ExtensibleAPIFactory
+from llmgineAPI.core.extensibility import ExtensibleAPIFactory, EngineConfiguration
 
-# Create custom configuration
-config = APIConfig(
-    title="My Translation Engine API",
-    description="WebSocket API for my specialized translation engine",
-    version="2.0.0",
-    custom={"supported_languages": ["en", "es", "fr"]}
-)
+class MyCustomBackend:
+    def __init__(self, messaging_api):
+        self.messaging = messaging_api
+    
+    async def send_user_notification(self, app_id: str, message: str):
+        """Send notification to specific frontend app"""
+        await self.messaging.send_to_app(
+            app_id=app_id,
+            message_type="notification", 
+            data={
+                "notification_type": "info",
+                "message": message
+            }
+        )
+    
+    async def request_user_input(self, app_id: str, prompt: str) -> str:
+        """Request input from user and wait for response"""
+        try:
+            response = await self.messaging.send_to_app_and_wait(
+                app_id=app_id,
+                message_type="server_request",
+                data={
+                    "request_type": "user_input",
+                    "prompt": prompt
+                },
+                timeout=30.0
+            )
+            return response.data.get("user_input", "")
+        except Exception as e:
+            print(f"Error getting user input: {e}")
+            return ""
 
-# Create API factory with custom extensions
+# Setup
+config = EngineConfiguration(engine_name="MyCustomEngine")
 api_factory = ExtensibleAPIFactory(config)
 
 # Register custom message handlers
 api_factory.register_custom_handler("translate", TranslateHandler)
-api_factory.register_custom_handler("analyze_sentiment", SentimentHandler)
 
-# Create customized app
-app = create_app(config=config, api_factory=api_factory)
+# Register connection event callbacks
+async def on_user_connected(app_id: str):
+    print(f"User connected: {app_id}")
+
+async def on_user_disconnected(app_id: str):
+    print(f"User disconnected: {app_id}")
+
+api_factory.register_connection_callback("connect", on_user_connected)
+api_factory.register_connection_callback("disconnect", on_user_disconnected)
+
+# Create app
+app = create_app(api_factory=api_factory)
+
+# Get messaging API after app creation
+messaging_api = api_factory.get_messaging_api()
+backend = MyCustomBackend(messaging_api)
+
+# Store in app state for use in handlers
+app.state.custom_backend = backend
 ```
 
-### 3. **Custom WebSocket Messages**
+### 3. **Server Messaging API Methods**
+
+The messaging API provides comprehensive methods for server-initiated communication:
 
 ```python
-from llmgineAPI.models.websocket import WSMessage, WSResponse
-from llmgineAPI.websocket.base import BaseHandler
-from typing import Optional, Dict, Any
-import uuid
+# Fire-and-forget messaging
+await messaging_api.send_to_app(app_id, "notification", {"message": "Hello!"})
+await messaging_api.send_to_session(session_id, "notification", {"message": "Hello!"})
 
-# Define custom request
-class TranslateRequest(WSMessage):
-    def __init__(self, text: str, target_language: str, message_id: Optional[str] = None):
+# Request-response messaging with Future-based waiting
+response = await messaging_api.send_to_app_and_wait(
+    app_id, 
+    "server_request", 
+    {"request_type": "confirmation", "message": "Proceed?"},
+    timeout=30.0
+)
+
+# Broadcasting
+sent_count = await messaging_api.broadcast(
+    "notification", 
+    {"message": "System maintenance in 5 minutes"},
+    exclude_apps={"admin-app-123"}
+)
+
+# Connection management
+connected_apps = messaging_api.get_connected_apps()
+is_connected = messaging_api.is_app_connected("some-app-id")
+app_sessions = messaging_api.get_app_sessions("some-app-id")
+```
+
+### 4. **Custom Server-Initiated Messages**
+
+```python
+from llmgineAPI.models.websocket import ServerMessage, ServerInitiatedMixin
+
+# Define custom server message
+class CustomServerMessage(ServerMessage, ServerInitiatedMixin):
+    def __init__(self, custom_data: str, message_id: Optional[str] = None):
         super().__init__(
-            type="translate",
+            type="custom_server_message",
             message_id=message_id or str(uuid.uuid4()),
-            data={"text": text, "target_language": target_language}
+            data={"custom_data": custom_data}
         )
 
-# Define custom response
-class TranslateResponse(WSResponse):
-    def __init__(self, original_text: str, translated_text: str, message_id: str):
-        super().__init__(
-            type="translate_res",
-            message_id=message_id,
-            data={"original_text": original_text, "translated_text": translated_text}
-        )
-
-# Create custom handler
-class TranslateHandler(BaseHandler):
-    @property
-    def message_type(self) -> str:
-        return "translate"
-    
-    @property
-    def request_model(self) -> type[WSMessage]:
-        return TranslateRequest
-    
-    async def handle(
-        self, 
-        message: Dict[str, Any], 
-        websocket: WebSocket
-    ) -> Optional[WSResponse]:
-        # Validate and extract data
-        req = TranslateRequest.model_validate(message)
-        text = req.data["text"]
-        target_lang = req.data["target_language"]
-        
-        # Your custom translation implementation
-        translated = await your_translation_service.translate(text, target_lang)
-        
-        return TranslateResponse(
-            original_text=text,
-            translated_text=translated,
-            message_id=req.message_id  # Maintain request-response mapping
-        )
+# Use in your backend
+custom_message = CustomServerMessage("Hello from server!")
+await connection.websocket.send_text(custom_message.model_dump_json())
 ```
 
 ## 📱 Frontend Integration
 
-The request-response mapping makes it easy for frontends to track messages:
+The bidirectional messaging makes frontend integration powerful and flexible:
 
 ```typescript
-// TypeScript frontend example
+// TypeScript frontend example with server message handling
 interface WebSocketMessage {
   type: string;
   message_id: string;
   data: any;
+  server_initiated?: boolean;
 }
 
 class WebSocketClient {
   private pendingRequests = new Map<string, (response: any) => void>();
+  private serverMessageHandlers = new Map<string, (message: any) => Promise<void>>();
   
+  // Client-initiated request-response
   async sendMessage(type: string, data: any): Promise<any> {
     const message_id = crypto.randomUUID();
     
     return new Promise((resolve) => {
-      // Store resolver for this message ID
       this.pendingRequests.set(message_id, resolve);
       
-      // Send message
       this.websocket.send(JSON.stringify({
         type,
         message_id,
@@ -344,71 +448,161 @@ class WebSocketClient {
     });
   }
   
-  private handleMessage(message: WebSocketMessage) {
+  // Register handler for server-initiated messages
+  registerServerMessageHandler(type: string, handler: (message: any) => Promise<void>) {
+    this.serverMessageHandlers.set(type, handler);
+  }
+  
+  private async handleMessage(message: WebSocketMessage) {
+    // Handle client request responses
     const resolver = this.pendingRequests.get(message.message_id);
     if (resolver) {
       resolver(message);
       this.pendingRequests.delete(message.message_id);
+      return;
     }
+    
+    // Handle server-initiated messages
+    if (message.server_initiated) {
+      if (message.type === "server_request") {
+        await this.handleServerRequest(message);
+      } else if (message.type === "notification") {
+        await this.handleNotification(message);
+      } else if (message.type === "server_ping") {
+        await this.handleServerPing(message);
+      }
+    }
+  }
+  
+  private async handleServerRequest(message: WebSocketMessage) {
+    const { request_type } = message.data;
+    const handler = this.serverMessageHandlers.get(request_type);
+    
+    if (handler) {
+      try {
+        await handler(message);
+      } catch (error) {
+        // Send error response
+        this.websocket.send(JSON.stringify({
+          type: "server_response",
+          message_id: message.message_id,
+          data: {
+            response_type: request_type,
+            error: error.message
+          }
+        }));
+      }
+    }
+  }
+  
+  private async handleServerPing(message: WebSocketMessage) {
+    // Auto-respond to server ping
+    this.websocket.send(JSON.stringify({
+      type: "server_pong",
+      message_id: message.message_id,
+      data: {
+        timestamp: message.data.timestamp,
+        server_timestamp: new Date().toISOString()
+      }
+    }));
+  }
+  
+  // Send response to server request
+  sendServerResponse(message_id: string, response_type: string, data: any) {
+    this.websocket.send(JSON.stringify({
+      type: "server_response",
+      message_id,
+      data: {
+        response_type,
+        ...data
+      }
+    }));
   }
 }
 
 // Usage
 const client = new WebSocketClient();
 
-// Create session and wait for response
-const sessionResponse = await client.sendMessage("create_session", {
-  app_id: "my-frontend-app"
+// Handle server requests for user input
+client.registerServerMessageHandler("user_input", async (message) => {
+  const userInput = await showInputDialog(message.data.prompt);
+  client.sendServerResponse(message.message_id, "user_input", {
+    user_input: userInput
+  });
 });
 
-// Use the session
-const statusResponse = await client.sendMessage("status", {
-  session_id: sessionResponse.data.session_id
+// Handle notifications
+client.registerServerMessageHandler("notification", async (message) => {
+  showNotification(message.data.message);
+});
+
+// Client-initiated requests still work
+const sessionResponse = await client.sendMessage("create_session", {
+  app_id: "my-frontend-app"
 });
 ```
 
 ## 🚀 Key Features
 
-### **1. Request-Response Mapping**
+### **1. Bidirectional Communication**
+- Server can initiate messages to clients
+- Future-based async/await pattern for server requests
+- Fire-and-forget notifications
+- Connection health monitoring with server pings
+
+### **2. Request-Response Mapping**
 - Every message has a unique `message_id` (UUID4)
-- Responses include the same `message_id` for client matching
-- Automatic ID generation if not provided
-- Frontend can track requests and match responses
+- Responses include the same `message_id` for matching
+- Works for both client-initiated and server-initiated messages
+- Automatic timeout handling with configurable timeouts
 
-### **2. App-Based Resource Management**
-- One `app_id` per WebSocket connection
-- Multiple sessions per `app_id`
-- Automatic cleanup on disconnect
-- Thread-safe resource tracking
+### **3. Connection Registry & Management**
+- Thread-safe connection tracking with metadata
+- Health monitoring and diagnostics
+- Automatic cleanup of stale connections
+- Connection event callbacks for custom backends
 
-### **3. Extensible Handler System**
-- Register custom WebSocket message handlers
-- Type-safe message validation with Pydantic
-- Automatic message routing and error handling
-- Support for unlimited custom message types
+### **4. Framework Integration API**
+- Clean messaging API for custom backends
+- Event callback system for connection/session lifecycle
+- Convenience methods for common messaging patterns
+- Type-safe interfaces with comprehensive error handling
 
-### **4. Production-Ready Features**
+### **5. Production-Ready Features**
 - Thread-safe operations with proper locking
-- Graceful shutdown handling
-- Health check endpoints for Kubernetes
+- Graceful shutdown with Future cancellation
+- Health check endpoints with connection metrics
 - Comprehensive error handling and logging
-- Automatic resource cleanup
+- Automatic resource cleanup and monitoring
 
-## 📋 Health Check Endpoints
+## 📋 API Endpoints
 
-The API provides health check endpoints for production deployment:
+### Health Check Endpoints
 
-### `GET /health`
-Basic health check endpoint.
+**`GET /health`** - Basic health check endpoint
 
-### `GET /health/ready`
-Readiness check for Kubernetes deployments. Validates:
+**`GET /health/ready`** - Readiness check for Kubernetes deployments. Validates:
 - Service initialization status
 - Monitor thread status
 - Active session/engine counts
+- WebSocket connection health
+- Pending server request counts
 
-### `GET /health/live`
-Liveness check for Kubernetes deployments.
+**`GET /health/live`** - Liveness check for Kubernetes deployments
+
+### Information Endpoints
+
+**`GET /api/info`** - Detailed API information including:
+- API configuration
+- Messaging capabilities
+- Custom extensions metadata
+- Server messaging features
+
+**`GET /api/connections`** - WebSocket connection information:
+- Active connections summary
+- Connected app IDs
+- Messaging capabilities overview
+- Connection health metrics
 
 ## 🔧 Configuration
 
@@ -429,12 +623,19 @@ Liveness check for Kubernetes deployments.
 from llmgineAPI.config import APIConfig
 
 config = APIConfig(
-    title="My Custom WebSocket API",
+    title="My Custom Messaging API",
     version="2.0.0",
     max_sessions=50,
     custom={
-        "my_setting": "value",
-        "feature_flags": {"advanced_mode": True}
+        "messaging_features": {
+            "server_requests": True,
+            "notifications": True,
+            "broadcasting": True
+        },
+        "timeouts": {
+            "server_request_timeout": 30,
+            "connection_cleanup_interval": 300
+        }
     }
 )
 
@@ -508,39 +709,43 @@ spec:
 - Type-safe message handling
 - Resource cleanup and management
 - Thread-safe operations
+- Request timeout handling
+- Connection health monitoring
 
 **Missing Security Features:**
-- Authentication/authorization
-- Rate limiting
-- CORS restrictions
-- Request logging/audit trail
+- Authentication/authorization for WebSocket connections
+- Rate limiting for server-initiated messages
+- Message encryption
+- Request logging/audit trail for server messages
 
 ### Recommended Security Enhancements
 
 1. **Authentication:**
    - WebSocket authentication during handshake
-   - JWT token validation
-   - API key support
+   - JWT token validation for server requests
+   - API key support for backend services
 
 2. **Rate Limiting:**
    - Message rate limiting per connection
-   - Session creation limits
+   - Server request frequency limits
    - Connection limits per IP
+   - Broadcast throttling
 
-3. **Input Validation:**
-   - Enhanced message size limits
-   - Content filtering
-   - XSS/injection prevention
+3. **Message Security:**
+   - Message payload encryption
+   - Request signing for server messages
+   - Content filtering and validation
+   - Size limits for all message types
 
 ## 🚀 Getting Started
 
-1. **Use as-is**: Import the default app for standard WebSocket functionality
-2. **Extend configuration**: Create custom `APIConfig` with your settings
-3. **Add custom messages**: Define new request/response models with message IDs
-4. **Create handlers**: Implement handlers for your custom messages
-5. **Register extensions**: Use `ExtensibleAPIFactory` to combine everything
-6. **Deploy**: Create your customized app and deploy
+1. **Use as-is**: Import the default app for standard WebSocket functionality with server messaging
+2. **Extend configuration**: Create custom `APIConfig` with messaging settings
+3. **Add custom handlers**: Define new request/response models and server message types
+4. **Implement backend**: Create custom backend class using the messaging API
+5. **Register callbacks**: Set up connection and session event handlers
+6. **Deploy**: Create your customized app with bidirectional messaging and deploy
 
-See `examples/custom_engine_example.py` for a complete implementation example.
+See `examples/custom_engine_example.py` for a complete implementation example with server messaging.
 
-This architecture ensures that the API module serves as a **solid WebSocket foundation** while remaining **completely extensible** for specialized use cases.
+This architecture ensures that the API module serves as a **powerful bidirectional WebSocket foundation** with **comprehensive server messaging capabilities** while remaining **completely extensible** for specialized use cases.

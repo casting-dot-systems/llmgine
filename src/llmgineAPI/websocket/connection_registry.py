@@ -237,6 +237,13 @@ class ConnectionRegistry:
                 "total_sessions": len(self._session_to_app),
                 "connections": connections_info
             }
+        
+    def get_app_id_by_session(self, session_id: SessionID) -> Optional[str]:
+        """
+        Get the app ID for a session ID.
+        """
+        with self._lock:
+            return self._session_to_app.get(session_id)
     
     def cleanup_stale_connections(self, max_idle_seconds: int = 3600) -> List[str]:
         """
