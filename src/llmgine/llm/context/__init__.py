@@ -1,7 +1,12 @@
 """
-Simplified context management for litellm.
+Simple, provider-agnostic chat context utilities.
 """
 
-from llmgine.llm.context.memory import SimpleChatHistory
+from .memory import SimpleChatHistory, SimpleMemory, ChatMessage, Role
 
-__all__ = ["SimpleChatHistory"]
+__all__ = [
+    "SimpleChatHistory",
+    "SimpleMemory",
+    "ChatMessage",
+    "Role",
+]

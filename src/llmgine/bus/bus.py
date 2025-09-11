@@ -135,7 +135,7 @@ class MessageBus(IMessageBus):
             if self._event_queue is None:
                 self._event_queue = asyncio.Queue()
 
-            await self._load_scheduled_events()
+            # await self._load_scheduled_events()
 
             self._running = True
             self._processing_task = asyncio.create_task(self._process_events())

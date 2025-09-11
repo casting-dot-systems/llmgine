@@ -1,20 +1,29 @@
 """
-Simplified tool management for litellm with MCP integration support.
-Handles tool registration, schema generation, and execution.
-Supports both local tools and MCP (Model Context Protocol) servers.
+Robust tool management with:
+- Schema generation (incl. Optional/Union/Literal/Enum)
+- Argument validation & coercion
+- Timeouts and max concurrency
+- Non-blocking execution of sync tools (threadpool)
+- Optional MCP discovery (graceful if deps missing)
 """
 
 import asyncio
 import inspect
 import json
 import logging
+import os
 from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional
+from enum import Enum
 
 from llmgine.llm import AsyncOrSyncToolFunction
 from llmgine.llm.tools.toolCall import ToolCall
-
-if TYPE_CHECKING:
-    from llmgine.llm.context.memory import SimpleChatHistory
+from llmgine.llm.tools.validation import coerce_value
+from llmgine.llm.tools.exceptions import (
+    ToolExecutionError,
+    ToolRegistrationError,
+    ToolTimeoutError,
+    ToolValidationError,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -28,7 +37,13 @@ class ToolManager:
     100% backward compatibility with existing LLMgine applications.
     """
     
-    def __init__(self, chat_history: Optional["SimpleChatHistory"] = None):
+    def __init__(
+        self,
+        chat_history: Optional["SimpleChatHistory"] = None,
+        *,
+        max_concurrency: Optional[int] = None,
+        default_timeout_s: Optional[float] = None,
+    ):
         """Initialize tool manager."""
         self.chat_history = chat_history
         self.tools: Dict[str, Callable] = {}
@@ -36,12 +51,21 @@ class ToolManager:
         # MCP integration support
         self.mcp_clients: Dict[str, Any] = {}  # Store MCP clients by name
         self._mcp_initialized = False
+        # Execution controls
+        self._sema = asyncio.Semaphore(
+            int(max_concurrency or os.getenv("LLMGINE_TOOL_MAX_CONCURRENCY", "8"))
+        )
+        self._timeout_s = float(
+            default_timeout_s or os.getenv("LLMGINE_TOOL_TIMEOUT_SECONDS", "30")
+        )
     
     def register_tool(self, func: AsyncOrSyncToolFunction) -> None:
         """Register a function as a tool."""
         name = func.__name__
+        if name in self.tools:
+            raise ToolRegistrationError(f"Tool '{name}' already registered")
         self.tools[name] = func
-        
+
         # Generate OpenAI-format schema
         schema = self._generate_tool_schema(func)
         self.tool_schemas.append(schema)
@@ -50,64 +74,45 @@ class ToolManager:
         """Generate OpenAI-format tool schema from function."""
         sig = inspect.signature(func)
         doc = inspect.getdoc(func) or f"Function {func.__name__}"
-        
         properties = {}
         required = []
-        
+
         for param_name, param in sig.parameters.items():
             if param_name == 'self':
                 continue
-            
-            # Determine type
-            param_type = "string"
-            if param.annotation != inspect.Parameter.empty:
-                annotation = param.annotation
-                # Handle basic types
-                if annotation == int:
-                    param_type = "integer"
-                elif annotation == float:
-                    param_type = "number"
-                elif annotation == bool:
-                    param_type = "boolean"
-                elif annotation in (list, List):
-                    param_type = "array"
-                elif annotation in (dict, Dict):
-                    param_type = "object"
-                # Handle Optional and generic types
-                elif hasattr(annotation, '__origin__'):
-                    origin = annotation.__origin__
-                    if origin == list or origin is list:
-                        param_type = "array"
-                    elif origin == dict or origin is dict:
-                        param_type = "object"
-                    # Handle Union types (Optional is Union[X, None])
-                    else:
-                        # Try to import Union from typing to check properly
-                        from typing import Union, get_origin, get_args
-                        if get_origin(annotation) is Union:
-                            # Get the first non-None type from Union args
-                            args = get_args(annotation)
-                            for arg in args:
-                                if arg is not type(None):
-                                    if arg == list or get_origin(arg) == list:
-                                        param_type = "array"
-                                        break
-                                    elif arg == dict or get_origin(arg) == dict:
-                                        param_type = "object"
-                                        break
-                                    elif arg == int:
-                                        param_type = "integer"
-                                        break
-                                    elif arg == float:
-                                        param_type = "number"
-                                        break
-                                    elif arg == bool:
-                                        param_type = "boolean"
-                                        break
-                                    elif arg == str:
-                                        param_type = "string"
-                                        break
-            
+
+            # Determine JSON schema for the parameter type
+            json_type = "string"
+            annotation = param.annotation
+            if annotation != inspect.Parameter.empty:
+                from typing import get_origin, get_args, Union, List, Dict
+                origin = get_origin(annotation)
+                args = get_args(annotation)
+
+                def _base_json_type(py_t: Any) -> str:
+                    if py_t in (int,):
+                        return "integer"
+                    if py_t in (float,):
+                        return "number"
+                    if py_t in (bool,):
+                        return "boolean"
+                    if py_t in (list, List):
+                        return "array"
+                    if py_t in (dict, Dict):
+                        return "object"
+                    return "string"
+
+                if origin is list:
+                    json_type = "array"
+                elif origin is dict:
+                    json_type = "object"
+                elif origin is Union:
+                    # Prefer first non-None type for display
+                    display = next((a for a in args if a is not type(None)), str)
+                    json_type = _base_json_type(display)
+                else:
+                    json_type = _base_json_type(annotation)
+
             # Extract description from docstring if available
             param_desc = f"{param_name} parameter"
             # Simple docstring parsing for parameter descriptions
@@ -116,12 +121,26 @@ class ToolManager:
                 end = doc.find("\n", start)
                 if end != -1:
                     param_desc = doc[start:end].strip()
-            
-            properties[param_name] = {
-                "type": param_type,
-                "description": param_desc
+
+            schema_prop: Dict[str, Any] = {
+                "type": json_type,
+                "description": param_desc,
             }
-            
+            # Attach enum values for Literal/Enum if we can
+            try:
+                from typing import Literal
+                if get_origin(annotation) is Literal:
+                    schema_prop["enum"] = list(get_args(annotation))
+            except Exception:
+                pass
+            try:
+                if isinstance(annotation, type) and issubclass(annotation, Enum):  # type: ignore
+                    schema_prop["enum"] = [m.value for m in annotation]  # type: ignore
+            except Exception:
+                pass
+
+            properties[param_name] = schema_prop
+
             # Check if required (no default value)
             if param.default == inspect.Parameter.empty:
                 required.append(param_name)
@@ -157,35 +176,81 @@ class ToolManager:
             return f"Error: Tool '{tool_call.name}' not found"
         
         func = self.tools[tool_call.name]
-        
+
         try:
             # Parse arguments
             if isinstance(tool_call.arguments, str):
                 if tool_call.arguments.strip() == "":
                     args = {}
                 else:
-                    args = json.loads(tool_call.arguments)
+                    try:
+                        args = json.loads(tool_call.arguments)
+                    except Exception:
+                        # Some providers pass already-encoded JSON-ish strings; last resort
+                        args = {"__raw__": tool_call.arguments}
             else:
                 args = tool_call.arguments
-            
+
             # Handle empty/None arguments
             if not args:
                 args = {}
-            
-            # Execute function
-            if asyncio.iscoroutinefunction(func):
-                result = await func(**args)
-            else:
-                result = func(**args)
-            
-            return result
+
+            # Validate & coerce against signature
+            bound = self._bind_and_coerce(func, args)
+
+            async with self._sema:
+                # Execute function (non-blocking even if sync)
+                if asyncio.iscoroutinefunction(func):
+                    try:
+                        return await asyncio.wait_for(func(**bound.arguments), timeout=self._timeout_s)
+                    except asyncio.TimeoutError as te:
+                        raise ToolTimeoutError(f"Tool '{tool_call.name}' timed out after {self._timeout_s}s") from te
+                else:
+                    loop = asyncio.get_running_loop()
+                    try:
+                        return await asyncio.wait_for(
+                            loop.run_in_executor(None, lambda: func(**bound.arguments)),
+                            timeout=self._timeout_s,
+                        )
+                    except asyncio.TimeoutError as te:
+                        raise ToolTimeoutError(f"Tool '{tool_call.name}' timed out after {self._timeout_s}s") from te
+
+        except (ToolValidationError, ToolTimeoutError, ToolExecutionError) as e:
+            return f"Error executing {tool_call.name}: {str(e)}"
         except Exception as e:
             return f"Error executing {tool_call.name}: {str(e)}"
+
+    def _bind_and_coerce(self, func: Callable, args: Dict[str, Any]):
+        """Bind provided args to function signature and coerce to annotated types."""
+        sig = inspect.signature(func)
+        try:
+            # Loose binding first: use only known params
+            filtered = {k: v for k, v in args.items() if k in sig.parameters}
+            bound = sig.bind_partial(**filtered)
+            for name, param in sig.parameters.items():
+                if name in bound.arguments:
+                    ann = param.annotation if param.annotation is not inspect._empty else None
+                    try:
+                        bound.arguments[name] = coerce_value(bound.arguments[name], ann)
+                    except Exception as e:
+                        raise ToolValidationError(f"Invalid value for '{name}': {e}") from e
+                elif param.default is not inspect._empty:
+                    continue  # default applies
+                elif param.kind in (inspect.Parameter.VAR_POSITIONAL, inspect.Parameter.VAR_KEYWORD):
+                    continue
+                else:
+                    raise ToolValidationError(f"Missing required parameter '{name}'")
+            return bound
+        except ToolValidationError:
+            raise
+        except Exception as e:
+            raise ToolValidationError(f"Failed to validate arguments: {e}") from e
     
     def chat_history_to_messages(self) -> List[Dict[str, Any]]:
-        """Get messages from chat history for litellm."""
-        if self.chat_history:
-            return self.chat_history.get_messages()
+        """Get messages from chat history for litellm.
+        
+        Note: This method is deprecated. Engines should manage their own chat history.
+        """
         return []
     
     # Backwards compatibility - these can be removed if not needed
@@ -197,7 +262,7 @@ class ToolManager:
     # MCP Integration Methods
     # ============================================================================
     
-    async def register_mcp_server(self, server_name: str, command: str, args: List[str], 
+    async def register_mcp_server(self, server_name: str, command: str, args: List[str],
                                  env: Optional[Dict[str, str]] = None) -> bool:
         """
         Register an MCP server and all its tools.

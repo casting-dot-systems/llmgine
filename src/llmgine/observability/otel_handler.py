@@ -5,6 +5,7 @@ from contextvars import ContextVar
 from typing import Any, Dict, Optional
 
 from llmgine.bus.session import SessionEndEvent, SessionStartEvent
+
 # LLM events removed - using litellm directly now
 # from llmgine.llm.providers.events import LLMCallEvent, LLMResponseEvent
 from llmgine.llm.tools.tool_events import ToolExecuteResultEvent

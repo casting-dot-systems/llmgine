@@ -5,6 +5,8 @@ TODO:
 - Test that the config is used correctly
 """
 
+import pytest
+from dataclasses import dataclass
 from llmgine.bootstrap import ApplicationConfig
 
 

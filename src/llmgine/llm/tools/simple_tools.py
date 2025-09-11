@@ -6,7 +6,7 @@ Handles tool registration, conversion to OpenAI format, and execution.
 import asyncio
 import inspect
 import json
-from typing import Any, Callable, Dict, List, Optional, Union
+from typing import Any, Callable, Dict, List
 
 from llmgine.llm.tools.toolCall import ToolCall
 
@@ -108,7 +108,7 @@ class SimpleToolManager:
             
             return str(result)
         except Exception as e:
-            return f"Error executing {tool_call.name}: {str(e)}"
+            return f"Error executing {tool_call.name}: {e!s}"
     
     async def execute_tool_calls(self, tool_calls: List[ToolCall]) -> List[str]:
         """Execute multiple tool calls."""

@@ -8,7 +8,6 @@ from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
 
 from llmgine.llm import ModelFormattedDictTool, SessionID
-from llmgine.llm.providers.providers import Providers
 from llmgine.llm.tools.mcp.mcp_servers import MCP_SERVERS
 from llmgine.llm.tools.mcp.mcp_tool_adapter import ToolAdapter
 
@@ -20,14 +19,14 @@ class MCPToolManager:
         self,
         engine_id: str,
         session_id: SessionID,
-        llm_model_name: Providers = Providers.OPENAI,
+        llm_model_name: str = "openai",
     ):
         # Initialize the MCP tool manager
         self.engine_id: str = engine_id
         self.session_id: SessionID = session_id
 
         # Initialize the tool adapter based on the LLM model
-        self.llm_model_name: Providers = llm_model_name
+        self.llm_model_name: str = llm_model_name
         self.tool_adapter: ToolAdapter = ToolAdapter(llm_model_name)
 
         # Initialize the MCP session
@@ -94,7 +93,7 @@ async def main():
         sys.exit(1)
 
     client = MCPToolManager(
-        engine_id="test", session_id=SessionID("test"), llm_model_name=Providers.OPENAI
+        engine_id="test", session_id=SessionID("test"), llm_model_name="openai"
     )
     try:
         await client.connect_to_mcp_server([MCP_SERVERS.NOTION])

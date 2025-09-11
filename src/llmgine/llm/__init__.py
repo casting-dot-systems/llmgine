@@ -1,3 +1,11 @@
+"""
+LLM-types placeholder (framework no longer owns LLM logic).
+
+Keep minimal shared type aliases used by bus/messages/tools so the rest of the
+framework (message bus, observability, tools/MCP) remains stable. Engines
+should directly use third-party frameworks (e.g., litellm, pydantic-ai).
+"""
+
 import asyncio
 from typing import Any, Callable, Dict, List, Literal, NewType, Union
 

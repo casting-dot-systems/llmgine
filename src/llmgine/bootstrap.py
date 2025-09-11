@@ -18,6 +18,9 @@ from llmgine.observability.handlers.adapters import (
     create_sync_file_handler,
 )
 from llmgine.observability.manager import ObservabilityManager
+from dotenv import load_dotenv
+
+load_dotenv(override=True)
 
 logger = logging.getLogger(__name__)
 

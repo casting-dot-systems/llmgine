@@ -34,3 +34,6 @@ class ToolExecuteResultEvent(ToolManagerEvent):
     tool_info: Dict[str, Any] = field(default_factory=dict)
     tool_args: Dict[str, Any] = field(default_factory=dict)
     tool_result: str = ""
+    # Added for observability compatibility (otel handler uses these):
+    tool_name: str = ""
+    tool_call_id: str = ""

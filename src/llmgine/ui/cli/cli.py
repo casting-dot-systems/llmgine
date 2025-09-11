@@ -1,4 +1,3 @@
-import asyncio
 import os
 import sys
 from dataclasses import dataclass
@@ -10,21 +9,14 @@ from rich.spinner import Spinner
 from llmgine.bus.bus import MessageBus
 from llmgine.bus.interfaces import AsyncCommandHandler
 from llmgine.llm import SessionID
-from llmgine.llm.engine.engine import (
-    DummyEngineConfirmationInput,
-    DummyEngineStatusUpdate,
-    DummyEngineToolResult,
-)
 from llmgine.messages.commands import Command, CommandResult
 from llmgine.messages.events import Event
 from llmgine.ui.cli.components import (
     CLIComponent,
     CLIPrompt,
     EngineResultComponent,
-    ToolComponent,
     UserComponent,
     UserGeneralInput,
-    YesNoPrompt,
 )
 
 
@@ -209,21 +201,4 @@ class EngineCLI:
         self.register_cli_command("exit", self.exit_cmd)
 
 
-async def main() -> None:
-    from llmgine.llm.engine.engine import DummyEngine, DummyEngineCommand
-
-    engine = DummyEngine(SessionID("123"))
-    chat = EngineCLI(SessionID("123"))
-    await MessageBus().start()
-    chat.register_engine(engine)
-    chat.register_engine_command(DummyEngineCommand, engine.handle_command)
-    chat.register_engine_result_component(EngineResultComponent)
-    chat.register_loading_event(DummyEngineStatusUpdate)
-    chat.register_prompt_command(DummyEngineConfirmationInput, YesNoPrompt)
-    chat.register_component_event(DummyEngineToolResult, ToolComponent)
-    chat.clear_screen()
-    await chat.main()
-
-
-if __name__ == "__main__":
-    asyncio.run(main())
+# Note: Demo/main removed. Engines can register themselves with EngineCLI from their own entrypoints.

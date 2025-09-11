@@ -6,7 +6,6 @@ enabling integration with the broader MCP ecosystem while preserving LLMgine's t
 """
 
 import asyncio
-import json
 import logging
 from typing import Any, Dict, List, Optional
 
@@ -102,7 +101,7 @@ class LLMgineMCPServer:
             }
             
         except Exception as e:
-            error_msg = f"Error executing tool {name}: {str(e)}"
+            error_msg = f"Error executing tool {name}: {e!s}"
             logger.error(error_msg)
             return {
                 "content": [
@@ -149,7 +148,7 @@ class LLMgineMCPServer:
             try:
                 from mcp.server import Server
                 from mcp.server.stdio import stdio_server
-                from mcp.types import Tool, TextContent
+                from mcp.types import TextContent, Tool
             except ImportError:
                 logger.error("MCP server dependencies not available")
                 return

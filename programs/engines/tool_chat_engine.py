@@ -2,19 +2,28 @@ import asyncio
 import json
 import uuid
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Dict, List, Optional
 
 from litellm import acompletion
 
 from llmgine.bus.bus import MessageBus
-from llmgine.llm import AsyncOrSyncToolFunction, SessionID
-from llmgine.llm.context.memory import SimpleChatHistory
+from llmgine.llm import SessionID
 from llmgine.llm.tools import ToolCall
 from llmgine.llm.tools.tool_manager import ToolManager
+from llmgine.llm.context.memory import SimpleChatHistory
+from llmgine.llm.tools.tool_events import ToolExecuteResultEvent
 from llmgine.messages.commands import Command, CommandResult
 from llmgine.messages.events import Event
 from llmgine.ui.cli.cli import EngineCLI
-from llmgine.ui.cli.components import EngineResultComponent
+from llmgine.ui.cli.components import EngineResultComponent, ToolComponent, ToolResultEvent
+
+# Optional pydantic-ai support (engines may use it without framework coupling)
+try:
+    # minimal, optional import; engine still works without it
+    import pydantic_ai  # type: ignore
+    _HAS_PYDANTIC_AI = True
+except Exception:
+    _HAS_PYDANTIC_AI = False
 
 
 @dataclass
@@ -29,6 +38,7 @@ class ToolChatEngineStatusEvent(Event):
     """Status event for the Tool Chat Engine."""
 
     status: str = ""
+
 
 
 def get_weather(city: str) -> str:
@@ -68,15 +78,15 @@ class ToolChatEngine:
         self.bus = MessageBus()
         self.model = model
 
-        # Initialize chat history
-        self.chat_history = SimpleChatHistory()
-        self.chat_history.set_system_prompt(
+        # Engine-local but reusable context manager
+        self.chat = SimpleChatHistory(engine_id="tool_chat_engine", session_id=self.session_id)
+        self.chat.set_system_prompt(
             "You are a helpful assistant with access to various tools. "
-            "Use the tools when appropriate to help answer user questions."
+            "Use tools when appropriate to help answer user questions."
         )
 
         # Initialize tool manager
-        self.tool_manager = ToolManager(self.chat_history)
+        self.tool_manager = ToolManager()
 
         # Register tools
         self._register_tools()
@@ -97,13 +107,13 @@ class ToolChatEngine:
             )
 
             # 1. Add user message to chat history
-            self.chat_history.add_user_message(command.prompt)
+            self.chat.add_user_message(command.prompt)
 
-            # 2. Get current context and tools
-            current_context = self.tool_manager.chat_history_to_messages()
+            # 2. Prepare current context and tools
+            current_context = self.chat.get_messages()
             tools = self.tool_manager.parse_tools_to_list()
 
-            # 3. Call the LLM
+            # 3. Call the LLM (litellm here; engines may also use pydantic-ai internally)
             await self.bus.publish(
                 ToolChatEngineStatusEvent(
                     status="calling LLM", session_id=self.session_id
@@ -140,14 +150,36 @@ class ToolChatEngine:
                 tool_results = await self.tool_manager.execute_tool_calls(tool_calls)
 
                 # Add assistant message with tool calls
-                self.chat_history.add_assistant_message(
-                    content=message.content or "", tool_calls=tool_calls
-                )
+                self.chat.add_assistant_message(content=message.content or "", tool_calls=tool_calls)
 
                 # Add tool results
                 for tool_call, result in zip(tool_calls, tool_results):
-                    self.chat_history.add_tool_message(
-                        tool_call_id=tool_call.id, content=str(result)
+                    self.chat.add_tool_message(tool_call_id=tool_call.id, content=str(result))
+                    # Publish a UI-oriented event and an observability event
+                    await self.bus.publish(
+                        ToolResultEvent(
+                            tool_name=tool_call.name, result=str(result), session_id=self.session_id
+                        )
+                    )
+                    try:
+                        tool_args_obj = (
+                            json.loads(tool_call.arguments)
+                            if isinstance(tool_call.arguments, str)
+                            else (tool_call.arguments or {})
+                        )
+                    except Exception:
+                        tool_args_obj = {"__raw__": tool_call.arguments}
+                    await self.bus.publish(
+                        ToolExecuteResultEvent(
+                            execution_succeed=not str(result).startswith("Error"),
+                            tool_info={"name": tool_call.name},
+                            tool_args=tool_args_obj or {},
+                            tool_result=str(result),
+                            tool_name=tool_call.name,
+                            tool_call_id=tool_call.id,
+                            engine_id="tool_chat_engine",
+                            session_id=self.session_id,
+                        )
                     )
 
                 # Get final response after tool execution
@@ -157,14 +189,14 @@ class ToolChatEngine:
                     )
                 )
 
-                final_context = self.tool_manager.chat_history_to_messages()
+                final_context = self.chat.get_messages()
                 final_response = await acompletion(
                     model=self.model, messages=final_context
                 )
 
                 if final_response.choices and final_response.choices[0].message.content:
                     final_content = final_response.choices[0].message.content
-                    self.chat_history.add_assistant_message(final_content)
+                    self.chat.add_assistant_message(final_content)
 
                     await self.bus.publish(
                         ToolChatEngineStatusEvent(
@@ -175,7 +207,7 @@ class ToolChatEngine:
             else:
                 # No tool calls, just return the response
                 content = message.content or ""
-                self.chat_history.add_assistant_message(content)
+                self.chat.add_assistant_message(content)
 
                 await self.bus.publish(
                     ToolChatEngineStatusEvent(
@@ -199,7 +231,7 @@ async def main():
     bootstrap = ApplicationBootstrap(config)
     await bootstrap.bootstrap()
 
-    # Create engine with GPT-4O Mini
+    # Create engine; model selection stays inside the engine
     engine = ToolChatEngine(model="gpt-4o-mini")
 
     # Set up CLI
@@ -208,6 +240,8 @@ async def main():
     cli.register_engine_command(ToolChatEngineCommand, engine.handle_command)
     cli.register_engine_result_component(EngineResultComponent)
     cli.register_loading_event(ToolChatEngineStatusEvent)
+    # Show tool results in the CLI
+    cli.register_component_event(ToolResultEvent, ToolComponent)
 
     # Run the CLI
     await cli.main()

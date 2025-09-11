@@ -1,8 +1,0 @@
-LLMgine Message Bus Performance Results
-========================================
-
-Throughput: 13,544 events/second
-Latency p99: 0.236ms
-Session cleanup: PASS
-
-All targets met: YES
