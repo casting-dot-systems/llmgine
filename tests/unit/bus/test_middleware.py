@@ -1,7 +1,7 @@
 """Tests for message bus middleware implementations."""
 
 import asyncio
-from typing import List
+from typing import Any, List
 
 import pytest
 

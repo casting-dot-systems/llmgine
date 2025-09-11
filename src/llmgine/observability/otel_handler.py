@@ -5,9 +5,6 @@ from contextvars import ContextVar
 from typing import Any, Dict, Optional
 
 from llmgine.bus.session import SessionEndEvent, SessionStartEvent
-
-# LLM events removed - using litellm directly now
-# from llmgine.llm.providers.events import LLMCallEvent, LLMResponseEvent
 from llmgine.llm.tools.tool_events import ToolExecuteResultEvent
 from llmgine.messages.events import (
     CommandResultEvent,
@@ -18,6 +15,25 @@ from llmgine.messages.events import (
 from llmgine.observability.manager import ObservabilityHandler
 
 logger = logging.getLogger(__name__)
+
+# Expose OTEL symbols at module scope so tests can patch them even if OTEL isn't installed
+try:
+    from opentelemetry import trace as _trace
+    from opentelemetry.trace import Status as _Status, StatusCode as _StatusCode
+except Exception:  # pragma: no cover - safe fallback when OTEL not installed
+    class _Dummy:
+        def __getattr__(self, _name):  # allow any attribute access
+            return self
+        def __call__(self, *args, **kwargs):  # allow calling
+            return self
+    _trace = _Dummy()
+    _Status = _Dummy()
+    _StatusCode = _Dummy()
+
+# Provide patch points for tests
+trace = _trace
+Status = _Status
+StatusCode = _StatusCode
 
 # Context variables to track current trace and spans
 current_trace: ContextVar[Optional[Any]] = ContextVar("current_trace", default=None)
@@ -46,7 +62,7 @@ class OpenTelemetryHandler(ObservabilityHandler):
     def _initialize_otel(self) -> None:
         """Initialize OpenTelemetry if available."""
         try:
-            from opentelemetry import trace
+            from opentelemetry import trace  # local import to avoid hard dependency
             from opentelemetry.sdk.resources import Resource
             from opentelemetry.sdk.trace import TracerProvider
             from opentelemetry.sdk.trace.export import (
@@ -92,10 +108,6 @@ class OpenTelemetryHandler(ObservabilityHandler):
         if not self._initialized:
             return
 
-        # Import here to avoid import errors when OTel not installed
-        from opentelemetry import trace
-        from opentelemetry.trace import Status, StatusCode
-
         event_type = type(event)
 
         # Map events to OpenTelemetry operations
@@ -117,41 +129,47 @@ class OpenTelemetryHandler(ObservabilityHandler):
 
         elif event_type == CommandStartedEvent:
             # Start new span for command
+            cmd = getattr(event, "command", None)
+            cmd_type = type(cmd).__name__ if cmd is not None else "unknown"
+            cmd_id = getattr(cmd, "command_id", "unknown")
             parent_context = current_trace.get()
             span = self._tracer.start_span(
-                name=f"command_{event.command_type}",
+                name=f"command_{cmd_type}",
                 context=parent_context,
                 attributes={
-                    "command.type": event.command_type,
-                    "command.id": event.command_id,
+                    "command.type": cmd_type,
+                    "command.id": cmd_id,
                     "session.id": str(event.session_id),
                     "event.id": event.event_id,
                 },
             )
             # Store span
             spans = current_spans.get() or {}
-            spans[event.command_id] = span
+            spans[cmd_id] = span
             current_spans.set(spans)
 
         elif event_type == CommandResultEvent:
             # End command span
             spans = current_spans.get() or {}
-            span = spans.get(event.command_id)
+            result = getattr(event, "command_result", None)
+            cmd_id = getattr(result, "command_id", None)
+            span = spans.get(cmd_id) if cmd_id else None
             if span:
                 # Add result attributes
-                span.set_attribute("command.success", event.success)
-                if hasattr(event, "result"):
-                    span.set_attribute("command.result_type", type(event.result).__name__)
+                span.set_attribute("command.success", getattr(result, "success", False))
+                if hasattr(result, "result"):
+                    span.set_attribute("command.result_type", type(result.result).__name__)
 
                 # Set status
-                if event.success:
+                if getattr(result, "success", False):
                     span.set_status(Status(StatusCode.OK))
                 else:
                     span.set_status(Status(StatusCode.ERROR, "Command failed"))
 
                 span.end()
                 # Remove from tracking
-                del spans[event.command_id]
+                if cmd_id in spans:
+                    del spans[cmd_id]
                 current_spans.set(spans)
 
         # LLM events removed - using litellm directly now
@@ -180,11 +198,11 @@ class OpenTelemetryHandler(ObservabilityHandler):
             parent_context = current_trace.get()
             # Create a span for the tool execution
             span = self._tracer.start_span(
-                name=f"tool_{event.tool_name}",
+                name=f"tool_{getattr(event, 'tool_name', 'unknown')}",
                 context=parent_context,
                 attributes={
-                    "tool.name": event.tool_name,
-                    "tool.call_id": event.tool_call_id
+                    "tool.name": getattr(event, "tool_name", "unknown"),
+                    "tool.call_id": getattr(event, "tool_call_id", "unknown")
                     if hasattr(event, "tool_call_id")
                     else "unknown",
                     "session.id": str(event.session_id),
@@ -193,8 +211,11 @@ class OpenTelemetryHandler(ObservabilityHandler):
             )
 
             # Add result data
-            if hasattr(event, "result"):
+            if hasattr(event, "tool_result"):
                 span.set_attribute("tool.has_result", True)
+                # optionally attach 'execution_succeed'
+                if hasattr(event, "execution_succeed"):
+                    span.set_attribute("tool.execution_succeed", bool(event.execution_succeed))
 
             span.set_status(Status(StatusCode.OK))
             span.end()
@@ -227,9 +248,9 @@ class OpenTelemetryHandler(ObservabilityHandler):
                 # Get the most recent span
                 span = list(spans.values())[-1]
                 span.record_exception(
-                    exception=Exception(f"Handler failed: {event.handler_name}"),
+                    exception=Exception(f"Handler failed: {getattr(event, 'handler', 'unknown')}"),
                     attributes={
-                        "handler.name": event.handler_name,
+                        "handler.name": getattr(event, "handler", "unknown"),
                         "handler.exception": str(event.exception)
                         if hasattr(event, "exception")
                         else "unknown",

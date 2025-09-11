@@ -225,21 +225,9 @@ class MessageBus(IMessageBus):
                 cast(Callable[[Event], None], handler)
             )
 
-        # Check if registry supports priority
-        if hasattr(self._registry, "register_event_handler"):
-            params = getattr(self._registry.register_event_handler, "__code__", None)
-            if params and "priority" in params.co_varnames:
-                self._registry.register_event_handler(
-                    event_type, cast(AsyncEventHandler, handler), session_id, priority
-                )
-            else:
-                self._registry.register_event_handler(
-                    event_type, cast(AsyncEventHandler, handler), session_id
-                )
-        else:
-            self._registry.register_event_handler(
-                event_type, cast(AsyncEventHandler, handler), session_id
-            )
+        self._registry.register_event_handler(
+            event_type, cast(AsyncEventHandler, handler), session_id, priority
+        )
 
         # Update registered handlers gauge
         total_handlers = sum(
@@ -365,8 +353,16 @@ class MessageBus(IMessageBus):
             logger.warning("Event queue not initialized, event will be lost")
             return
 
-        if self._observability:
-            self._observability.observe_event(event)
+        # Forward to ObservabilityManager directly (no bus indirection)
+        if self._observability is not None:
+            try:
+                self._observability.observe_event(event)
+            except Exception:
+                # Never let observability issues affect the bus
+                import logging
+                logging.getLogger(__name__).error(
+                    "Observability handler failed for event %s", type(event).__name__, exc_info=True
+                )
 
         for filter_func in self._event_filters:
             if not filter_func.should_handle(event, event.session_id):

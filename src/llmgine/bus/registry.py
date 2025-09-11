@@ -1,182 +1,172 @@
-"""Simplified handler registry implementation without sync/async confusion.
+from dataclasses import dataclass, field
+from typing import Any, Awaitable, Callable, Dict, List, Optional, Set, Tuple, Type, TypeVar
 
-This module provides a clean implementation of handler registration and lookup.
-"""
-
-import asyncio
-import logging
-from collections import defaultdict
-from dataclasses import dataclass
-from typing import Dict, List, Optional, Set, Type
-
-from llmgine.bus.interfaces import (
-    AsyncCommandHandler,
-    AsyncEventHandler,
-    HandlerPriority,
-)
+from llmgine.bus.interfaces import HandlerPriority
 from llmgine.llm import SessionID
-from llmgine.messages.commands import Command
+from llmgine.messages.commands import Command, CommandResult
 from llmgine.messages.events import Event
 
-logger = logging.getLogger(__name__)
+CommandHandler = Callable[[Command], Awaitable[CommandResult]]
+EventHandler = Callable[[Event], Awaitable[None]]
 
 
-@dataclass
+@dataclass(order=True)
 class EventHandlerEntry:
-    """Entry for an event handler with priority."""
-
-    handler: AsyncEventHandler
-    priority: int = HandlerPriority.NORMAL
-
-    def __lt__(self, other: "EventHandlerEntry") -> bool:
-        """Sort by priority (lower number = higher priority)."""
-        return self.priority < other.priority
+    priority: int
+    handler: EventHandler = field(compare=False)
 
 
 class HandlerRegistry:
-    """Simple handler registry implementation.
-
-    This implementation provides:
-    - Clean separation between BUS scope and session scope
-    - Event handler priorities
-    - Thread-safe operations using locks
     """
+    Async-friendly handler registry that supports BUS scope and per-session scope.
+    """
+    def __init__(self) -> None:
+        # Command handlers: either BUS or session-scoped
+        self._bus_command_handlers: Dict[Type[Command], CommandHandler] = {}
+        self._session_command_handlers: Dict[SessionID, Dict[Type[Command], CommandHandler]] = {}
+        # Event handlers: BUS and session-scoped lists with priority ordering
+        self._bus_event_handlers: Dict[Type[Event], List[EventHandlerEntry]] = {}
+        self._session_event_handlers: Dict[SessionID, Dict[Type[Event], List[EventHandlerEntry]]] = {}
 
-    def __init__(self):
-        """Initialize the registry."""
-        self._command_handlers: Dict[
-            SessionID, Dict[Type[Command], AsyncCommandHandler]
-        ] = defaultdict(dict)
-        self._event_handlers: Dict[
-            SessionID, Dict[Type[Event], List[EventHandlerEntry]]
-        ] = defaultdict(lambda: defaultdict(list))
-        self._lock = asyncio.Lock()
-
+    # ------------------- Command handlers -------------------
     def register_command_handler(
         self,
         command_type: Type[Command],
-        handler: AsyncCommandHandler,
+        handler: CommandHandler,
         session_id: SessionID = SessionID("BUS"),
     ) -> None:
-        """Register a command handler (synchronous for compatibility)."""
-        if command_type in self._command_handlers[session_id]:
-            raise ValueError(
-                f"Command handler for {command_type.__name__} already registered "
-                f"in session {session_id}"
-            )
+        """Synchronous version for backwards compatibility."""
+        if session_id == SessionID("BUS"):
+            if command_type in self._bus_command_handlers:
+                raise ValueError(f"Command handler for {command_type.__name__} already registered")
+            self._bus_command_handlers[command_type] = handler
+        else:
+            self._session_command_handlers.setdefault(session_id, {})
+            if command_type in self._session_command_handlers[session_id]:
+                raise ValueError(
+                    f"Command handler for {command_type.__name__} already registered in session {session_id}"
+                )
+            self._session_command_handlers[session_id][command_type] = handler
 
-        self._command_handlers[session_id][command_type] = handler
-        logger.debug(
-            f"Registered command handler for {command_type.__name__} "
-            f"in session {session_id}"
-        )
-
-    def register_event_handler(
+    async def async_register_command_handler(
         self,
-        event_type: Type[Event],
-        handler: AsyncEventHandler,
+        command_type: Type[Command],
+        handler: CommandHandler,
         session_id: SessionID = SessionID("BUS"),
-        priority: int = HandlerPriority.NORMAL,
     ) -> None:
-        """Register an event handler (synchronous for compatibility)."""
-        entry = EventHandlerEntry(handler=handler, priority=priority)
-        handlers = self._event_handlers[session_id][event_type]
-        handlers.append(entry)
-        # Keep handlers sorted by priority
-        handlers.sort()
-
-        logger.debug(
-            f"Registered event handler for {event_type.__name__} "
-            f"in session {session_id} with priority {priority}"
-        )
+        """Async version for testing."""
+        self.register_command_handler(command_type, handler, session_id)
 
     def get_command_handler(
         self,
         command_type: Type[Command],
         session_id: SessionID,
-    ) -> Optional[AsyncCommandHandler]:
-        """Get the command handler for a specific command type and session."""
-        # Try session-specific handler first
-        handler = self._command_handlers.get(session_id, {}).get(command_type)
+    ) -> Optional[CommandHandler]:
+        """Synchronous version for backwards compatibility."""
+        # prefer session-specific, fallback to BUS
+        if session_id in self._session_command_handlers:
+            if command_type in self._session_command_handlers[session_id]:
+                return self._session_command_handlers[session_id][command_type]
+        return self._bus_command_handlers.get(command_type)
 
-        # Fall back to BUS scope if not found and session is not BUS
-        if handler is None and session_id != SessionID("BUS"):
-            handler = self._command_handlers.get(SessionID("BUS"), {}).get(command_type)
-            if handler:
-                logger.debug(
-                    f"Using BUS-scoped handler for {command_type.__name__} "
-                    f"(no handler in session {session_id})"
-                )
+    async def async_get_command_handler(
+        self,
+        command_type: Type[Command],
+        session_id: SessionID,
+    ) -> Optional[CommandHandler]:
+        """Async version for testing."""
+        return self.get_command_handler(command_type, session_id)
 
-        return handler
+    # ------------------- Event handlers -------------------
+    def register_event_handler(
+        self,
+        event_type: Type[Event],
+        handler: EventHandler,
+        session_id: SessionID = SessionID("BUS"),
+        priority: int = HandlerPriority.NORMAL,
+    ) -> None:
+        """Synchronous version for backwards compatibility."""
+        entry = EventHandlerEntry(priority=int(priority), handler=handler)
+        if session_id == SessionID("BUS"):
+            self._bus_event_handlers.setdefault(event_type, [])
+            self._bus_event_handlers[event_type].append(entry)
+            self._bus_event_handlers[event_type].sort()
+        else:
+            self._session_event_handlers.setdefault(session_id, {})
+            self._session_event_handlers[session_id].setdefault(event_type, [])
+            self._session_event_handlers[session_id][event_type].append(entry)
+            self._session_event_handlers[session_id][event_type].sort()
+
+    async def async_register_event_handler(
+        self,
+        event_type: Type[Event],
+        handler: EventHandler,
+        session_id: SessionID = SessionID("BUS"),
+        priority: int = HandlerPriority.NORMAL,
+    ) -> None:
+        """Async version for testing."""
+        self.register_event_handler(event_type, handler, session_id, priority)
 
     def get_event_handlers(
         self,
         event_type: Type[Event],
         session_id: SessionID,
-    ) -> List[AsyncEventHandler]:
-        """Get all event handlers for a specific event type and session."""
+    ) -> List[EventHandler]:
+        """Synchronous version for backwards compatibility."""
         handlers: List[EventHandlerEntry] = []
+        # BUS handlers first (will be executed as well as session-scoped)
+        handlers.extend(self._bus_event_handlers.get(event_type, []))
+        # Session handlers if any
+        if session_id in self._session_event_handlers:
+            handlers.extend(self._session_event_handlers[session_id].get(event_type, []))
+        # return in priority order
+        return [e.handler for e in sorted(handlers)]
 
-        # Get session-specific handlers
-        if session_id in self._event_handlers:
-            handlers.extend(self._event_handlers[session_id].get(event_type, []))
+    async def async_get_event_handlers(
+        self,
+        event_type: Type[Event],
+        session_id: SessionID,
+    ) -> List[EventHandler]:
+        """Async version for testing."""
+        return self.get_event_handlers(event_type, session_id)
 
-        # Add BUS-scoped handlers if session is not BUS
-        if session_id != SessionID("BUS") and SessionID("BUS") in self._event_handlers:
-            handlers.extend(self._event_handlers[SessionID("BUS")].get(event_type, []))
-
-        # Sort by priority and extract handler functions
-        handlers.sort()
-        return [entry.handler for entry in handlers]
-
+    # ------------------- Maintenance & Stats -------------------
     def unregister_session(self, session_id: SessionID) -> None:
-        """Remove all handlers for a specific session."""
+        """Synchronous version for backwards compatibility."""
         if session_id == SessionID("BUS"):
-            logger.warning("Cannot unregister BUS scope handlers")
+            # Explicitly do nothing for BUS scope
             return
+        self._session_command_handlers.pop(session_id, None)
+        self._session_event_handlers.pop(session_id, None)
 
-        # Remove command handlers
-        num_cmd = len(self._command_handlers.get(session_id, {}))
-        if session_id in self._command_handlers:
-            del self._command_handlers[session_id]
-
-        # Remove event handlers
-        num_evt = sum(
-            len(handlers)
-            for handlers in self._event_handlers.get(session_id, {}).values()
-        )
-        if session_id in self._event_handlers:
-            del self._event_handlers[session_id]
-
-        if num_cmd > 0 or num_evt > 0:
-            logger.info(
-                f"Unregistered session {session_id}: "
-                f"{num_cmd} command handlers, {num_evt} event handlers"
-            )
+    async def async_unregister_session(self, session_id: SessionID) -> None:
+        """Async version for testing."""
+        self.unregister_session(session_id)
 
     def get_all_sessions(self) -> Set[SessionID]:
-        """Get all active session IDs."""
-        cmd_sessions = set(self._command_handlers.keys())
-        evt_sessions = set(self._event_handlers.keys())
-        return cmd_sessions | evt_sessions
+        """Synchronous version for backwards compatibility."""
+        sessions: Set[SessionID] = set(self._session_command_handlers.keys()) | set(self._session_event_handlers.keys())
+        sessions.add(SessionID("BUS"))
+        return sessions
+
+    async def async_get_all_sessions(self) -> Set[SessionID]:
+        """Async version for testing."""
+        return self.get_all_sessions()
 
     def get_handler_stats(self) -> Dict[str, int]:
-        """Get statistics about registered handlers."""
-        total_commands = sum(
-            len(handlers) for handlers in self._command_handlers.values()
-        )
-        total_events = sum(
-            sum(len(h) for h in handlers.values())
-            for handlers in self._event_handlers.values()
-        )
-
+        """Synchronous version for backwards compatibility."""
+        total_cmd_bus = len(self._bus_command_handlers)
+        total_evt_bus = sum(len(lst) for lst in self._bus_event_handlers.values())
+        total_cmd_sessions = sum(len(d) for d in self._session_command_handlers.values())
+        total_evt_sessions = sum(len(lst) for sess in self._session_event_handlers.values() for lst in sess.values())
         return {
             "total_sessions": len(self.get_all_sessions()),
-            "total_command_handlers": total_commands,
-            "total_event_handlers": total_events,
-            "bus_command_handlers": len(self._command_handlers.get(SessionID("BUS"), {})),
-            "bus_event_handlers": sum(
-                len(h) for h in self._event_handlers.get(SessionID("BUS"), {}).values()
-            ),
+            "total_command_handlers": total_cmd_bus + total_cmd_sessions,
+            "total_event_handlers": total_evt_bus + total_evt_sessions,
+            "bus_command_handlers": total_cmd_bus,
+            "bus_event_handlers": total_evt_bus,
         }
+
+    async def async_get_handler_stats(self) -> Dict[str, int]:
+        """Async version for testing."""
+        return self.get_handler_stats()

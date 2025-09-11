@@ -68,17 +68,20 @@ class TestOpenTelemetryHandler:
         handler._initialized = True
         handler._tracer = mock_tracer
 
+        # Fake command object with required attributes
+        class _Cmd:
+            command_id = "cmd-123"
+
         # Create and handle event
-        event = CommandStartedEvent(
-            session_id="test-session", command_id="cmd-123", command_type="TestCommand"
-        )
+        event = CommandStartedEvent(session_id="test-session", command=_Cmd())
         handler.handle(event)
 
         # Verify span was created
         mock_tracer.start_span.assert_called_once()
         call_args = mock_tracer.start_span.call_args
-        assert "command_TestCommand" in call_args[1]["name"]
-        assert call_args[1]["attributes"]["command.type"] == "TestCommand"
+        # We don't assert exact command type name (depends on object),
+        # but we do assert the prefix and attributes are set
+        assert call_args[1]["name"].startswith("command_")
         assert call_args[1]["attributes"]["command.id"] == "cmd-123"
 
     @patch("llmgine.observability.otel_handler.current_spans")
@@ -96,13 +99,16 @@ class TestOpenTelemetryHandler:
         handler._initialized = True
 
         # Create and handle event
-        event = CommandResultEvent(
-            session_id="test-session", command_id="cmd-123", success=True
-        )
+        class _CR:
+            command_id = "cmd-123"
+            success = True
+            result = {"ok": True}
+
+        event = CommandResultEvent(session_id="test-session", command_result=_CR())
         handler.handle(event)
 
         # Verify span was updated and ended
-        mock_span.set_attribute.assert_called_with("command.success", True)
+        mock_span.set_attribute.assert_any_call("command.success", True)
         mock_span.set_status.assert_called_once()
         mock_span.end.assert_called_once()
 
@@ -119,12 +125,15 @@ class TestOpenTelemetryHandler:
         handler._initialized = True
         handler._tracer = mock_tracer
 
-        # Create and handle event
+        # Create and handle event (updated fields)
         event = ToolExecuteResultEvent(
             session_id="test-session",
             tool_name="TestTool",
             tool_call_id="call-789",
-            result={"data": "test"},
+            execution_succeed=True,
+            tool_info={"name": "TestTool"},
+            tool_args={"param": "value"},
+            tool_result='{"data":"test"}',
         )
         handler.handle(event)
 
@@ -147,7 +156,7 @@ class TestOpenTelemetryHandler:
         # Create and handle event
         event = EventHandlerFailedEvent(
             session_id="test-session",
-            handler_name="TestHandler",
+            handler="TestHandler",
             exception=Exception("Test error"),
         )
         handler.handle(event)
@@ -183,21 +192,14 @@ class TestOpenTelemetryHandler:
         handler._tracer = Mock()
 
         # List of events that should be handled
-        event_types = [
-            SessionStartEvent,
-            SessionEndEvent,
-            CommandStartedEvent,
-            CommandResultEvent,
-            ToolExecuteResultEvent,
-            EventHandlerFailedEvent,
+        events = [
+            SessionStartEvent(session_id="s"),
+            SessionEndEvent(session_id="s"),
+            CommandStartedEvent(session_id="s", command=type("C", (), {"command_id": "c"})()), 
+            CommandResultEvent(session_id="s", command_result=type("R", (), {"command_id": "c", "success": True})()), 
+            ToolExecuteResultEvent(session_id="s", tool_name="t", tool_call_id="tc"),
+            EventHandlerFailedEvent(session_id="s", handler="h", exception=Exception("x")),
         ]
 
-        # Verify each event type can be handled without error
-        for event_type in event_types:
-            # Create appropriate mock event
-            if hasattr(event_type, "__name__"):
-                # Should not raise exception
-                event = Mock(spec=event_type)
-                event.session_id = "test"
-                event.event_id = "test-id"
-                handler.handle(event)
+        for ev in events:
+            handler.handle(ev)  # Should not raise

@@ -8,6 +8,7 @@ TODO:
 import pytest
 from dataclasses import dataclass
 from llmgine.bootstrap import ApplicationConfig
+from llmgine.observability.events import LogLevel
 
 
 @pytest.mark.asyncio

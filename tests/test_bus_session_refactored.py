@@ -241,8 +241,9 @@ class TestBusSession:
             sessions.append(session)
             session.register_event_handler(MockEvent, recorder.async_handler)
 
-        # Publish event - all should receive it
-        await clean_message_bus.publish(MockEvent(data="broadcast"))
+        # Publish one event per session (session-scoped delivery)
+        for s in sessions:
+            await clean_message_bus.publish(MockEvent(data="broadcast", session_id=s.session_id))
         await asyncio.sleep(0.05)
 
         # All recorders should have been called
