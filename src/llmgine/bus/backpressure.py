@@ -192,6 +192,11 @@ class BoundedEventQueue(Generic[T]):
                 try:
                     # Remove oldest item
                     dropped = self._queue.get_nowait()
+                    # Mark the dropped task as done to keep unfinished_tasks balanced
+                    try:
+                        self._queue.task_done()
+                    except Exception:
+                        pass
                     self._metrics.total_dropped += 1
                     logger.warning(
                         f"Dropped oldest item due to overflow: {type(dropped).__name__}"

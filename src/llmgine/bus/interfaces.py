@@ -89,8 +89,20 @@ class IEventQueue(Protocol):
         """Return True if the queue is empty."""
         ...
 
+    def get_nowait(self) -> Event:
+        """Get an event from the queue without waiting."""
+        ...
+
     def task_done(self) -> None:
         """Indicate that a formerly enqueued task is complete."""
+        ...
+
+    async def join(self) -> None:
+        """Block until all items in the queue have been processed."""
+        ...
+
+    def full(self) -> bool:
+        """Return True if the queue is full (if bounded)."""
         ...
 
 

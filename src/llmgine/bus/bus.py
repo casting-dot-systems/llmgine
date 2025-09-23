@@ -100,9 +100,7 @@ class MessageBus(IMessageBus):
             return
 
         self._registry: IHandlerRegistry = registry or HandlerRegistry()
-        self._event_queue: Optional[asyncio.Queue[Event]] = cast(
-            Optional[asyncio.Queue[Event]], event_queue
-        )
+        self._event_queue: Optional[IEventQueue] = cast(Optional[IEventQueue], event_queue)
         self._observability = observability
 
         # Middleware and filters
@@ -203,12 +201,17 @@ class MessageBus(IMessageBus):
             command_type, cast(AsyncCommandHandler, handler), session_id
         )
 
-        # Update registered handlers gauge
-        total_handlers = sum(
-            len(handlers)
-            for handlers in getattr(self._registry, "_event_handlers", {}).values()
-        )
-        metrics.set_gauge("registered_handlers", total_handlers)
+        # Update registered handlers gauge using registry stats
+        try:
+            stats = {}
+            if hasattr(self._registry, "get_handler_stats"):
+                stats = self._registry.get_handler_stats()  # type: ignore[attr-defined]
+            total_handlers = (
+                stats.get("total_event_handlers", 0) + stats.get("total_command_handlers", 0)
+            )
+            metrics.set_gauge("registered_handlers", total_handlers)
+        except Exception:
+            pass
 
     def register_event_handler(
         self,
@@ -229,12 +232,17 @@ class MessageBus(IMessageBus):
             event_type, cast(AsyncEventHandler, handler), session_id, priority
         )
 
-        # Update registered handlers gauge
-        total_handlers = sum(
-            len(handlers)
-            for handlers in getattr(self._registry, "_event_handlers", {}).values()
-        )
-        metrics.set_gauge("registered_handlers", total_handlers)
+        # Update registered handlers gauge using registry stats
+        try:
+            stats = {}
+            if hasattr(self._registry, "get_handler_stats"):
+                stats = self._registry.get_handler_stats()  # type: ignore[attr-defined]
+            total_handlers = (
+                stats.get("total_event_handlers", 0) + stats.get("total_command_handlers", 0)
+            )
+            metrics.set_gauge("registered_handlers", total_handlers)
+        except Exception:
+            pass
 
     def unregister_session_handlers(self, session_id: SessionID) -> None:
         """Unregister all handlers for a session."""
@@ -353,6 +361,9 @@ class MessageBus(IMessageBus):
             logger.warning("Event queue not initialized, event will be lost")
             return
 
+        # capture error count to detect new errors after processing
+        pre_error_count = len(self.event_handler_errors)
+
         # Forward to ObservabilityManager directly (no bus indirection)
         if self._observability is not None:
             try:
@@ -378,33 +389,23 @@ class MessageBus(IMessageBus):
 
         if await_processing and not isinstance(event, ScheduledEvent):
             await self.wait_for_events()
+            # If errors are not suppressed and new errors occurred during processing,
+            # surface the last one to the caller to match test expectations.
+            if not self._suppress_event_errors and len(self.event_handler_errors) > pre_error_count:
+                raise self.event_handler_errors[-1]
 
     async def wait_for_events(self) -> None:
         """Wait for all current events to be processed."""
         if self._event_queue is None:
             return
 
-        events_to_process = []
-        scheduled_events = []
-
-        while not self._event_queue.empty():
-            try:
-                event = self._event_queue.get_nowait()
-                if (
-                    isinstance(event, ScheduledEvent)
-                    and event.scheduled_time > datetime.now()
-                ):
-                    scheduled_events.append(event)
-                else:
-                    events_to_process.append(event)
-            except asyncio.QueueEmpty:
-                break
-
-        for event in scheduled_events:
-            await self._event_queue.put(event)
-
-        if events_to_process:
-            await self._process_event_batch(events_to_process)
+        # Use proper queue.join semantics; relies on task_done() being called
+        try:
+            await self._event_queue.join()
+        except Exception:
+            # Fallback if a custom queue doesn't implement join()
+            while not self._event_queue.empty():
+                await asyncio.sleep(0.01)
 
     # --- Event Processing ---
 
@@ -445,7 +446,12 @@ class MessageBus(IMessageBus):
 
                 if isinstance(event, ScheduledEvent):
                     if event.scheduled_time > datetime.now():
+                        # Re-queue future event and mark the original task as done
                         await self._event_queue.put(event)
+                        try:
+                            self._event_queue.task_done()
+                        except Exception:
+                            pass
                         continue
 
                 batch.append(event)
@@ -484,6 +490,14 @@ class MessageBus(IMessageBus):
                 if isinstance(result, Exception):
                     _, event, handler = tasks[i]
                     await self._handle_event_error(event, handler, result)
+
+        # Mark each event in the batch as done once all handlers completed
+        if self._event_queue:
+            for _ in batch:
+                try:
+                    self._event_queue.task_done()
+                except Exception:
+                    pass
 
     async def _handle_event_with_middleware(
         self,
@@ -530,9 +544,6 @@ class MessageBus(IMessageBus):
         logger.exception(
             f"Error in handler '{handler_name}' for {type(event).__name__}: {error}"
         )
-
-        if not self._suppress_event_errors:
-            raise error
 
         await self.publish(
             EventHandlerFailedEvent(

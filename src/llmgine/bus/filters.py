@@ -1,13 +1,23 @@
 import re
 import time
-from dataclasses import dataclass
-from typing import Any, Callable, Dict, Iterable, List, Optional, Pattern, Set, Tuple, Type
+from typing import (
+    Any,
+    Callable,
+    Dict,
+    List,
+    Optional,
+    Pattern,
+    Set,
+    Tuple,
+    Type,
+)
 
+from llmgine.bus.interfaces import EventFilter as EventFilterABC
 from llmgine.llm import SessionID
 from llmgine.messages.events import Event
 
 
-class EventFilter:
+class EventFilter(EventFilterABC):
     def should_handle(self, event: Event, session_id: SessionID) -> bool:
         return True
 

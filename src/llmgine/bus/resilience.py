@@ -280,24 +280,22 @@ class ResilientMessageBus(MessageBus):
         )
 
     async def start(self) -> None:
-        """Start the message bus with bounded event queue."""
-        if self._processing_task is None:
-            if self._event_queue is None:
-                # Create bounded queue with backpressure handling
-                self._event_queue = BoundedEventQueue[Event](
-                    maxsize=self._event_queue_size,
-                    strategy=self._backpressure_strategy,
-                    high_water_mark=0.8,
-                    low_water_mark=0.5,
-                    on_high_water=self._on_high_water_mark,
-                    on_low_water=self._on_low_water_mark,
-                )
-                logger.info("Bounded event queue created with backpressure handling")
-            await self._load_scheduled_events()
-            self._processing_task = asyncio.create_task(self._process_events())
-            logger.info("ResilientMessageBus started")
-        else:
-            logger.warning("ResilientMessageBus already running")
+        """Start the message bus with bounded event queue and processing loop."""
+        if self._event_queue is None:
+            # Create bounded queue with backpressure handling
+            self._event_queue = BoundedEventQueue[Event](
+                maxsize=self._event_queue_size,
+                strategy=self._backpressure_strategy,
+                high_water_mark=0.8,
+                low_water_mark=0.5,
+                on_high_water=self._on_high_water_mark,
+                on_low_water=self._on_low_water_mark,
+            )
+            logger.info("Bounded event queue created with backpressure handling")
+
+        await self._load_scheduled_events()
+        await super().start()  # sets _running and spawns the processing loop
+        logger.info("ResilientMessageBus started")
 
     def _on_high_water_mark(self) -> None:
         """Handle high water mark reached in event queue."""
@@ -655,13 +653,16 @@ class ResilientMessageBus(MessageBus):
             event: The event to publish
             await_processing: Whether to wait for event processing
         """
-        logger.info(
-            f"Publishing event {type(event).__name__} in session {event.session_id}"
-        )
+        logger.info("Publishing event %s in session %s", type(event).__name__, event.session_id)
+        metrics = get_metrics_collector()
+        pre_error_count = len(self.event_handler_errors)
 
         # Direct call to observability - no event publishing
         if self._observability:
-            self._observability.observe_event(event)
+            try:
+                self._observability.observe_event(event)
+            except Exception:
+                logger.error("Observability handler failed", exc_info=True)
 
         try:
             if self._event_queue is None:
@@ -672,20 +673,29 @@ class ResilientMessageBus(MessageBus):
                 success = await self._event_queue.put(event)
                 if success:
                     logger.debug(f"Queued event: {type(event).__name__}")
+                    metrics.inc_counter("events_published_total")
+                    metrics.set_gauge("queue_size", self._event_queue.qsize())
                 else:
                     logger.warning(
                         f"Failed to queue event due to backpressure: {type(event).__name__}"
                     )
+                    # Even if rejected, we don't raise; simply return.
+                    return
             else:
                 # Fallback to regular queue behavior
                 await self._event_queue.put(event)
                 logger.debug(f"Queued event: {type(event).__name__}")
+                metrics.inc_counter("events_published_total")
+                metrics.set_gauge("queue_size", self._event_queue.qsize())
 
         except Exception as e:
             logger.error(f"Error queuing event: {e}", exc_info=True)
         finally:
             if not isinstance(event, ScheduledEvent) and await_processing:
                 await self.wait_for_events()
+                # Surface errors if unsuppressed and new ones occurred while waiting
+                if (not self._suppress_event_errors) and (len(self.event_handler_errors) > pre_error_count):
+                    raise self.event_handler_errors[-1]
 
     async def wait_for_events(self) -> None:
         """Wait for all current events to be processed."""

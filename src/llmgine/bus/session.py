@@ -142,7 +142,7 @@ class BusSession:
             raise RuntimeError("Cannot execute commands on an inactive session")
 
         # Set session ID on the command
-        command.session_id = self.session_id
+        command.session_id = SessionID(self.session_id)
 
         # Execute via the bus and await the result directly
         return await self.bus.execute(command)
