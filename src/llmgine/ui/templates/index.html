@@ -1,0 +1,124 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"/>
+  <title>LLMgine Bus Playground</title>
+  <meta name="viewport" content="width=device-width,initial-scale=1"/>
+  <link rel="stylesheet" href="/static/style.css"/>
+</head>
+<body>
+  <header>
+    <h1>LLMgine – Message Bus Playground</h1>
+    <div id="status">Disconnected</div>
+  </header>
+
+  <section class="controls">
+    <h2>Bus Controls</h2>
+    <div class="row">
+      <label>Bus</label>
+      <select id="bus-kind">
+        <option value="resilient" selected>ResilientMessageBus</option>
+        <option value="basic">MessageBus (basic)</option>
+      </select>
+
+      <label>Queue Size</label>
+      <input type="number" id="queue-size" value="10000" />
+
+      <label>Backpressure</label>
+      <select id="backpressure">
+        <option value="drop_oldest" selected>Drop oldest</option>
+        <option value="reject_new">Reject new</option>
+        <option value="adaptive_rate_limit">Adaptive rate limit</option>
+      </select>
+
+      <button id="start">Start</button>
+      <button id="stop">Stop</button>
+      <button id="reset">Reset</button>
+    </div>
+
+    <div class="row">
+      <label>Batch size</label><input type="number" id="batch-size" value="10"/>
+      <label>Batch timeout (s)</label><input type="number" step="0.001" id="batch-timeout" value="0.01"/>
+      <button id="apply-batch">Apply</button>
+    </div>
+  </section>
+
+  <section class="controls">
+    <h2>Middleware</h2>
+    <div class="row">
+      <label><input type="checkbox" data-mw="logging"> Logging</label>
+      <label><input type="checkbox" data-mw="validation"> Validation</label>
+      <label><input type="checkbox" data-mw="timing"> Timing</label>
+      <label><input type="checkbox" data-mw="retry"> Retry</label>
+      <label><input type="checkbox" data-mw="rate_limit" id="mw-rate"> Rate limit</label>
+      <input type="number" id="mw-rate-pps" value="10" title="max per second"/>
+    </div>
+  </section>
+
+  <section class="controls">
+    <h2>Filters</h2>
+    <div class="row">
+      <button id="add-debug-filter">Add Debug Filter</button>
+      <button id="add-session-filter">Session Filter BUS only</button>
+      <button id="add-type-filter">Type Filter (LogEvent only)</button>
+      <button id="add-pattern-filter">Pattern Filter (.*ResultEvent)</button>
+    </div>
+  </section>
+
+  <section class="playground">
+    <h2>Playground</h2>
+    <div class="row">
+      <input id="pg-session" placeholder="session id (optional)" />
+    </div>
+    <div class="row">
+      <input id="echo-text" placeholder="echo text"/><button id="btn-echo">Execute EchoCommand</button>
+      <input id="fail-msg" placeholder="fail msg" value="boom"/><button id="btn-fail">Execute FailingCommand</button>
+      <input id="sleep-sec" type="number" step="0.05" value="0.25"/><button id="btn-sleep">Execute SleepCommand</button>
+      <input id="gen-count" type="number" value="100"/><input id="gen-delay" type="number" value="0" />
+      <button id="btn-gen">Execute GenerateEventsCommand</button>
+    </div>
+    <div class="row">
+      <input id="evt-msg" placeholder="event msg"/><button id="btn-evt">Publish LogEvent</button>
+      <input id="sched-sec" type="number" value="3"/><button id="btn-sched">Schedule Ping</button>
+    </div>
+    <div class="row">
+      <input id="fire-rps" type="number" value="200"/><input id="fire-dur" type="number" value="10"/>
+      <input id="fire-prefix" value="firehose"/>
+      <button id="btn-fire">Start Firehose</button>
+    </div>
+
+    <!-- Status and Results Panel -->
+    <div class="results-panel">
+      <h3>Command Results & Status</h3>
+      <div id="status-messages" class="status-messages"></div>
+      <div id="command-results" class="command-results"></div>
+    </div>
+  </section>
+
+  <section class="panes">
+    <div class="pane">
+      <h3>Key Metrics</h3>
+      <div id="metrics-summary" class="metrics-summary"></div>
+      <details>
+        <summary>Full Metrics (JSON)</summary>
+        <pre id="metrics"></pre>
+      </details>
+      <button id="refresh-metrics">Manual Refresh</button>
+    </div>
+    <div class="pane">
+      <h3>Recent Events & Commands</h3>
+      <div class="event-controls">
+        <button id="clear-events">Clear Events</button>
+        <label><input type="checkbox" id="auto-scroll" checked> Auto-scroll</label>
+      </div>
+      <div id="events-container" class="events-container"></div>
+    </div>
+  </section>
+
+  <footer>
+    <small>Tip: Use firehose to exercise backpressure; try different strategies.</small>
+  </footer>
+
+  <script src="/static/main.js"></script>
+</body>
+</html>
