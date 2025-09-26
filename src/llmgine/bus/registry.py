@@ -178,3 +178,22 @@ class HandlerRegistry:
     async def async_get_handler_stats(self) -> Dict[str, int]:
         """Async version for testing."""
         return self.get_handler_stats()
+
+    # ---- Enhanced: expose entries including priority so the bus can honor ordering strictly ----
+    def get_event_handler_entries(
+        self,
+        event_type: Type[Event],
+        session_id: SessionID,
+    ) -> List[EventHandlerEntry]:
+        handlers: List[EventHandlerEntry] = []
+        handlers.extend(self._bus_event_handlers.get(event_type, []))
+        if session_id in self._session_event_handlers:
+            handlers.extend(self._session_event_handlers[session_id].get(event_type, []))
+        return sorted(handlers)
+
+    async def async_get_event_handler_entries(
+        self,
+        event_type: Type[Event],
+        session_id: SessionID,
+    ) -> List[EventHandlerEntry]:
+        return self.get_event_handler_entries(event_type, session_id)

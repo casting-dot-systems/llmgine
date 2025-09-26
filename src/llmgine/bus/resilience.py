@@ -15,7 +15,7 @@ from llmgine.bus.bus import MessageBus
 from llmgine.bus.metrics import get_metrics_collector
 from llmgine.llm import SessionID
 from llmgine.messages.commands import Command, CommandResult
-from llmgine.messages.events import Event
+from llmgine.messages.events import Event, DeadLetterCommandEvent
 from llmgine.messages.scheduled_events import ScheduledEvent
 
 logger = logging.getLogger(__name__)
@@ -501,8 +501,11 @@ class ResilientMessageBus(MessageBus):
             metrics.set_gauge("dead_letter_queue_size", self._dead_letter_queue.qsize())
 
             # Publish event about dead letter
-            await self.publish(
-                Event(
+            await self.publish(  # type: ignore[call-arg]
+                DeadLetterCommandEvent(
+                    command=command,
+                    error=error,
+                    attempts=attempts,
                     session_id=command.session_id,
                     metadata={
                         "event_type": "dead_letter_added",

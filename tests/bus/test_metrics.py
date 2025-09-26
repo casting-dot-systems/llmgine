@@ -193,6 +193,23 @@ async def test_queue_size_metrics(bus: MessageBus):
 
 
 @pytest.mark.asyncio
+async def test_queue_size_gauge_updates_after_drain(bus: MessageBus):
+    """Queue size gauge should update back to 0 after processing."""
+    processed = []
+
+    async def handle_event(event: MetricsTestEvent):
+        processed.append(1)
+
+    bus.register_event_handler(MetricsTestEvent, handle_event)
+    for _ in range(5):
+        await bus.publish(MetricsTestEvent(), await_processing=False)
+
+    await bus.wait_for_events()
+    metrics = await bus.get_metrics()
+    assert metrics["gauges"]["queue_size"]["value"] == 0
+
+
+@pytest.mark.asyncio
 async def test_handler_registration_metrics(bus: MessageBus):
     """Test handler registration metrics."""
     # Initial state

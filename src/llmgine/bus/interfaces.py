@@ -5,6 +5,7 @@ This module defines the contracts for extensible message bus components.
 
 from abc import ABC, abstractmethod
 from typing import (
+    Any,
     Awaitable,
     Callable,
     List,
@@ -18,6 +19,7 @@ from typing import (
 from llmgine.llm import SessionID
 from llmgine.messages.commands import Command, CommandResult
 from llmgine.messages.events import Event
+from dataclasses import dataclass
 
 # Type aliases for handlers
 CommandType = TypeVar("CommandType", bound=Command)
@@ -62,6 +64,13 @@ class IHandlerRegistry(Protocol):
         session_id: SessionID,
     ) -> List[AsyncEventHandler]:
         """Get all event handlers for a specific event type and session."""
+        ...
+    # Optional extended API: return entries with priorities
+    def get_event_handler_entries(
+        self,
+        event_type: Type[Event],
+        session_id: SessionID,
+    ) -> List[Any]:  # EventHandlerEntry (to avoid circular type at runtime)
         ...
 
     def unregister_session(self, session_id: SessionID) -> None:

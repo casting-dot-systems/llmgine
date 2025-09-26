@@ -8,6 +8,7 @@ This module provides a clean, production-ready message bus with:
 """
 
 import asyncio
+from collections import defaultdict
 import logging
 import traceback
 from contextlib import asynccontextmanager
@@ -36,11 +37,12 @@ from llmgine.bus.interfaces import (
     IMessageBus,
 )
 from llmgine.bus.metrics import Timer, get_metrics_collector
-from llmgine.bus.registry import HandlerRegistry
+from llmgine.bus.registry import HandlerRegistry, EventHandlerEntry
 from llmgine.bus.session import BusSession
 from llmgine.bus.utils import is_async_function
 from llmgine.database.database import (
     get_and_delete_unfinished_events,
+    persist_event,
     save_unfinished_events,
 )
 from llmgine.llm import SessionID
@@ -73,7 +75,6 @@ class MessageBus(IMessageBus):
     """
 
     _instance: Optional["MessageBus"] = None
-    _lock = asyncio.Lock()
 
     def __new__(cls, *args: Any, **kwargs: Any) -> "MessageBus":
         """Thread-safe singleton implementation."""
@@ -101,6 +102,8 @@ class MessageBus(IMessageBus):
 
         self._registry: IHandlerRegistry = registry or HandlerRegistry()
         self._event_queue: Optional[IEventQueue] = cast(Optional[IEventQueue], event_queue)
+        # Per-instance start/stop lock (loop-safe)
+        self._start_stop_lock: asyncio.Lock = asyncio.Lock()
         self._observability = observability
 
         # Middleware and filters
@@ -114,6 +117,11 @@ class MessageBus(IMessageBus):
         self._suppress_event_errors = True
         self.event_handler_errors: List[Exception] = []
 
+        # Pre-start event buffer (prevents silent drops)
+        self._prestart_events: List[Event] = []
+        # Cap memory for retained handler errors
+        self._max_error_history: int = 1000
+
         # Performance settings
         self._batch_size = 10
         self._batch_timeout = 0.01
@@ -125,7 +133,7 @@ class MessageBus(IMessageBus):
 
     async def start(self) -> None:
         """Start the message bus event processing."""
-        async with self._lock:
+        async with self._start_stop_lock:
             if self._running:
                 logger.warning("MessageBus is already running")
                 return
@@ -133,7 +141,20 @@ class MessageBus(IMessageBus):
             if self._event_queue is None:
                 self._event_queue = asyncio.Queue()
 
-            # await self._load_scheduled_events()
+            # Attempt to restore scheduled events (graceful if DB not configured)
+            try:
+                await self._load_scheduled_events()
+            except Exception as e:  # pragma: no cover
+                logger.warning(f"Skipping scheduled-event load: {e}")
+
+            # Flush any pre-start events that were buffered
+            if self._prestart_events:
+                metrics = get_metrics_collector()
+                for ev in self._prestart_events:
+                    await self._event_queue.put(ev)
+                    metrics.inc_counter("events_published_total")
+                metrics.set_gauge("queue_size", self._event_queue.qsize())
+                self._prestart_events.clear()
 
             self._running = True
             self._processing_task = asyncio.create_task(self._process_events())
@@ -141,7 +162,7 @@ class MessageBus(IMessageBus):
 
     async def stop(self) -> None:
         """Stop the message bus event processing."""
-        async with self._lock:
+        async with self._start_stop_lock:
             if not self._running:
                 logger.info("MessageBus is not running")
                 return
@@ -159,7 +180,11 @@ class MessageBus(IMessageBus):
                 finally:
                     self._processing_task = None
 
-            await self._save_scheduled_events()
+            # Save any scheduled events left in the queue (best-effort)
+            try:
+                await self._save_scheduled_events()
+            except Exception as e:  # pragma: no cover
+                logger.warning(f"Skipping scheduled-event save: {e}")
             self._event_queue = None
 
             logger.info("MessageBus stopped")
@@ -358,7 +383,11 @@ class MessageBus(IMessageBus):
         metrics = get_metrics_collector()
 
         if self._event_queue is None:
-            logger.warning("Event queue not initialized, event will be lost")
+            # Buffer instead of dropping when bus hasn't started yet
+            logger.warning(
+                "Event queue not initialized; buffering event until MessageBus.start()"
+            )
+            self._prestart_events.append(event)
             return
 
         # capture error count to detect new errors after processing
@@ -382,6 +411,9 @@ class MessageBus(IMessageBus):
                     f"{type(filter_func).__name__}"
                 )
                 return
+
+        # Optional event persistence (no-op unless LLMGINE_PERSIST_EVENTS=1)
+        persist_event(event)
 
         await self._event_queue.put(event)
         metrics.inc_counter("events_published_total")
@@ -463,41 +495,59 @@ class MessageBus(IMessageBus):
 
     async def _process_event_batch(self, batch: List[Event]) -> None:
         """Process a batch of events."""
-        tasks = []
+        metrics = get_metrics_collector()
 
         for event in batch:
             event_type = type(event)
-            handlers = self._registry.get_event_handlers(event_type, event.session_id)
+            # Prefer entries with priorities if registry supports it
+            entries: List[EventHandlerEntry]
+            if hasattr(self._registry, "get_event_handler_entries"):
+                # type: ignore[attr-defined]
+                entries = self._registry.get_event_handler_entries(event_type, event.session_id)  # type: ignore
+            else:
+                handlers_fallback = self._registry.get_event_handlers(event_type, event.session_id)
+                from llmgine.bus.interfaces import HandlerPriority
+                entries = [EventHandlerEntry(priority=HandlerPriority.NORMAL, handler=h) for h in handlers_fallback]
 
-            if not handlers:
+            if not entries:
                 logger.debug(
                     f"No handlers for {event_type.__name__} in session {event.session_id}"
                 )
+                # Mark the event done even with no handlers to keep join() semantics correct
+                if self._event_queue:
+                    try:
+                        self._event_queue.task_done()
+                    except Exception:
+                        pass
                 continue
 
-            for handler in handlers:
-                task = asyncio.create_task(
-                    self._handle_event_with_middleware(event, handler)
-                )
-                tasks.append((task, event, handler))
+            # Group handlers by priority; lower numeric value = higher priority
+            priority_groups: Dict[int, List[AsyncEventHandler]] = defaultdict(list)
+            for entry in entries:
+                priority_groups[int(entry.priority)].append(entry.handler)
 
-        if tasks:
-            results = await asyncio.gather(
-                *[task for task, _, _ in tasks], return_exceptions=True
-            )
+            # Execute priority groups in order (highest first)
+            for prio in sorted(priority_groups.keys()):
+                group_handlers = priority_groups[prio]
+                group_tasks = [
+                    asyncio.create_task(self._handle_event_with_middleware(event, h))
+                    for h in group_handlers
+                ]
+                if group_tasks:
+                    results = await asyncio.gather(*group_tasks, return_exceptions=True)
+                    for i, result in enumerate(results):
+                        if isinstance(result, Exception):
+                            await self._handle_event_error(event, group_handlers[i], result)
 
-            for i, result in enumerate(results):
-                if isinstance(result, Exception):
-                    _, event, handler = tasks[i]
-                    await self._handle_event_error(event, handler, result)
-
-        # Mark each event in the batch as done once all handlers completed
-        if self._event_queue:
-            for _ in batch:
+            # Mark this event as done once all its handlers finished
+            if self._event_queue:
                 try:
                     self._event_queue.task_done()
                 except Exception:
                     pass
+
+        # Refresh the queue size gauge after finishing the batch
+        metrics.set_gauge("queue_size", self._event_queue.qsize() if self._event_queue else 0)
 
     async def _handle_event_with_middleware(
         self,
@@ -538,7 +588,10 @@ class MessageBus(IMessageBus):
         metrics = get_metrics_collector()
         metrics.inc_counter("events_failed_total")
 
+        # Bound memory used by retained exceptions
         self.event_handler_errors.append(error)
+        if len(self.event_handler_errors) > self._max_error_history:
+            del self.event_handler_errors[: len(self.event_handler_errors) - self._max_error_history]
         handler_name = getattr(handler, "__qualname__", repr(handler))
 
         logger.exception(
@@ -592,6 +645,14 @@ class MessageBus(IMessageBus):
         self._batch_size = max(1, batch_size)
         self._batch_timeout = max(0.001, batch_timeout)
 
+    def set_error_history_limit(self, limit: int) -> None:
+        """Configure the maximum number of handler exceptions to retain."""
+        self._max_error_history = max(0, int(limit))
+        if self._max_error_history == 0:
+            self.event_handler_errors.clear()
+        elif len(self.event_handler_errors) > self._max_error_history:
+            del self.event_handler_errors[: len(self.event_handler_errors) - self._max_error_history]
+
     # --- Persistence ---
 
     async def _save_scheduled_events(self) -> None:
@@ -624,7 +685,11 @@ class MessageBus(IMessageBus):
         if self._event_queue is None:
             return
 
-        events = get_and_delete_unfinished_events()
+        try:
+            events = get_and_delete_unfinished_events()
+        except Exception as e:  # pragma: no cover
+            logger.warning(f"Could not load scheduled events: {e}")
+            events = []
         for event in events:
             await self._event_queue.put(event)
 

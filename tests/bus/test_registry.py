@@ -22,12 +22,12 @@ class TestEvent(Event):
     value: str = "test"
 
 
-async def test_command_handler(cmd: Command) -> CommandResult:
+async def sample_command_handler(cmd: Command) -> CommandResult:
     """Test command handler."""
     return CommandResult(success=True, command_id=cmd.command_id)
 
 
-async def test_event_handler(evt: Event) -> None:
+async def sample_event_handler(evt: Event) -> None:
     """Test event handler."""
     pass
 
@@ -41,11 +41,11 @@ class TestHandlerRegistry:
         registry = HandlerRegistry()
 
         # Register handler
-        await registry.async_register_command_handler(TestCommand, test_command_handler)
+        await registry.async_register_command_handler(TestCommand, sample_command_handler)
 
         # Verify registration
         handler = await registry.async_get_command_handler(TestCommand, SessionID("BUS"))
-        assert handler == test_command_handler
+        assert handler == sample_command_handler
 
     @pytest.mark.asyncio
     async def test_duplicate_command_handler_raises(self):
@@ -53,11 +53,11 @@ class TestHandlerRegistry:
         registry = HandlerRegistry()
 
         # Register handler
-        await registry.async_register_command_handler(TestCommand, test_command_handler)
+        await registry.async_register_command_handler(TestCommand, sample_command_handler)
 
         # Try to register again
         with pytest.raises(ValueError, match="already registered"):
-            await registry.async_register_command_handler(TestCommand, test_command_handler)
+            await registry.async_register_command_handler(TestCommand, sample_command_handler)
 
     @pytest.mark.asyncio
     async def test_async_register_event_handler(self):
@@ -65,15 +65,15 @@ class TestHandlerRegistry:
         registry = HandlerRegistry()
 
         # Register handler
-        await registry.async_register_event_handler(TestEvent, test_event_handler)
+        await registry.async_register_event_handler(TestEvent, sample_event_handler)
 
         # Verify registration
         handlers = await registry.async_get_event_handlers(TestEvent, SessionID("BUS"))
         assert len(handlers) == 1
-        assert handlers[0] == test_event_handler
+        assert handlers[0] == sample_event_handler
 
     @pytest.mark.asyncio
-    async def test_event_handler_priority(self):
+    async def sample_event_handler_priority(self):
         """Test event handler priority ordering."""
         registry = HandlerRegistry()
 
@@ -106,12 +106,12 @@ class TestHandlerRegistry:
 
         # Register session-specific handler
         await registry.async_register_command_handler(
-            TestCommand, test_command_handler, session_id
+            TestCommand, sample_command_handler, session_id
         )
 
         # Verify it's found for the session
         handler = await registry.async_get_command_handler(TestCommand, session_id)
-        assert handler == test_command_handler
+        assert handler == sample_command_handler
 
         # Verify it's not found for other sessions
         handler = await registry.async_get_command_handler(
@@ -126,14 +126,14 @@ class TestHandlerRegistry:
 
         # Register BUS-scoped handler
         await registry.async_register_command_handler(
-            TestCommand, test_command_handler, SessionID("BUS")
+            TestCommand, sample_command_handler, SessionID("BUS")
         )
 
         # Should find it for any session
         handler = await registry.async_get_command_handler(
             TestCommand, SessionID("any-session")
         )
-        assert handler == test_command_handler
+        assert handler == sample_command_handler
 
     @pytest.mark.asyncio
     async def test_async_unregister_session(self):
@@ -143,9 +143,9 @@ class TestHandlerRegistry:
 
         # Register handlers
         await registry.async_register_command_handler(
-            TestCommand, test_command_handler, session_id
+            TestCommand, sample_command_handler, session_id
         )
-        await registry.async_register_event_handler(TestEvent, test_event_handler, session_id)
+        await registry.async_register_event_handler(TestEvent, sample_event_handler, session_id)
 
         # Verify they exist
         assert await registry.async_get_command_handler(TestCommand, session_id) is not None
@@ -165,7 +165,7 @@ class TestHandlerRegistry:
 
         # Register BUS handler
         await registry.async_register_command_handler(
-            TestCommand, test_command_handler, SessionID("BUS")
+            TestCommand, sample_command_handler, SessionID("BUS")
         )
 
         # Try to unregister BUS scope
@@ -173,7 +173,7 @@ class TestHandlerRegistry:
 
         # Handler should still exist
         handler = await registry.async_get_command_handler(TestCommand, SessionID("BUS"))
-        assert handler == test_command_handler
+        assert handler == sample_command_handler
 
     @pytest.mark.asyncio
     async def test_async_get_all_sessions(self):
@@ -182,10 +182,10 @@ class TestHandlerRegistry:
 
         # Register handlers in different sessions
         await registry.async_register_command_handler(
-            TestCommand, test_command_handler, SessionID("session1")
+            TestCommand, sample_command_handler, SessionID("session1")
         )
         await registry.async_register_event_handler(
-            TestEvent, test_event_handler, SessionID("session2")
+            TestEvent, sample_event_handler, SessionID("session2")
         )
 
         # Get all sessions
@@ -200,13 +200,13 @@ class TestHandlerRegistry:
 
         # Register various handlers
         await registry.async_register_command_handler(
-            TestCommand, test_command_handler, SessionID("BUS")
+            TestCommand, sample_command_handler, SessionID("BUS")
         )
         await registry.async_register_event_handler(
-            TestEvent, test_event_handler, SessionID("session1")
+            TestEvent, sample_event_handler, SessionID("session1")
         )
         await registry.async_register_event_handler(
-            TestEvent, test_event_handler, SessionID("session1")
+            TestEvent, sample_event_handler, SessionID("session1")
         )
 
         # Get stats
@@ -218,12 +218,12 @@ class TestHandlerRegistry:
         assert stats["bus_command_handlers"] == 1
         assert stats["bus_event_handlers"] == 0
 
-    def test_event_handler_entry_sorting(self):
+    def sample_event_handler_entry_sorting(self):
         """Test EventHandlerEntry sorting by priority."""
         entries = [
-            EventHandlerEntry(handler=test_event_handler, priority=50),
-            EventHandlerEntry(handler=test_event_handler, priority=10),
-            EventHandlerEntry(handler=test_event_handler, priority=90),
+            EventHandlerEntry(handler=sample_event_handler, priority=50),
+            EventHandlerEntry(handler=sample_event_handler, priority=10),
+            EventHandlerEntry(handler=sample_event_handler, priority=90),
         ]
 
         sorted_entries = sorted(entries)

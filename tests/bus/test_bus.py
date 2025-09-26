@@ -232,6 +232,52 @@ async def test_event_handler_priorities(bus: MessageBus):
     assert "low" in execution_order
 
 
+# New: enforce strict priority sequencing (high must complete before low runs)
+@pytest.mark.asyncio
+async def test_event_handler_priority_enforcement_strict():
+    bus = MessageBus()
+    await bus.reset()
+    await bus.start()
+
+    execution = {"high_done": False}
+
+    async def high_priority_handler(event: TestEvent):
+        await asyncio.sleep(0.02)
+        execution["high_done"] = True
+
+    async def low_priority_handler(event: TestEvent):
+        # Must only run after high finished
+        assert execution["high_done"] is True
+
+    bus.register_event_handler(TestEvent, low_priority_handler, priority=HandlerPriority.LOW)
+    bus.register_event_handler(TestEvent, high_priority_handler, priority=HandlerPriority.HIGH)
+
+    await bus.publish(TestEvent(test_data="prio"))
+    await bus.stop()
+    await bus.reset()
+
+
+# New: publishing before start is buffered (no silent drop)
+@pytest.mark.asyncio
+async def test_publish_before_start_is_buffered():
+    bus = MessageBus()
+    await bus.reset()
+
+    received: List[TestEvent] = []
+
+    async def collector(evt: TestEvent):
+        received.append(evt)
+
+    bus.register_event_handler(TestEvent, collector)
+    # Publish before start – should be buffered
+    await bus.publish(TestEvent(test_data="prestart"), await_processing=False)
+    await bus.start()
+    await asyncio.sleep(0.05)
+    assert len(received) == 1
+    await bus.stop()
+    await bus.reset()
+
+
 # Test error handling
 
 
@@ -330,3 +376,20 @@ async def test_get_stats(bus: MessageBus):
     assert stats["batch_size"] == 10  # Default
     assert stats["batch_timeout"] == 0.01  # Default
     assert stats["error_suppression"] is True  # Default
+
+
+# New: error history is capped
+@pytest.mark.asyncio
+async def test_event_error_history_is_capped():
+    bus = MessageBus()
+    await bus.start()
+    bus.set_error_history_limit(5)
+
+    async def failing(evt: TestEvent):
+        raise RuntimeError("boom")
+
+    bus.register_event_handler(TestEvent, failing)
+    for _ in range(10):
+        await bus.publish(TestEvent(test_data="x"))
+    assert len(bus.event_handler_errors) <= 5
+    await bus.stop()

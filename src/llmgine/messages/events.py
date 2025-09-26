@@ -81,3 +81,14 @@ class CommandResultEvent(Event):
     """Event emitted when a command result is created."""
 
     command_result: Optional[CommandResult] = None
+
+
+# --- New: typed dead-letter event for failed commands in the resilient bus ---
+@dataclass
+class DeadLetterCommandEvent(Event):
+    """Event emitted when a command is added to the dead-letter queue."""
+
+    command: Optional[Command] = None
+    error: Optional[str] = None
+    attempts: int = 0
+    # Additional metadata can be attached via the Event.metadata field

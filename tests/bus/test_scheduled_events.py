@@ -135,5 +135,32 @@ async def test_scheduled_events_with_kill():
     sys.exit(1)
 
 
+@pytest.mark.asyncio
+async def test_base_bus_reloads_scheduled_events(monkeypatch):
+    """Base bus should restore scheduled events on start (without requiring real DB)."""
+    bus = MessageBus()
+    await bus.reset()
+
+    received = []
+
+    async def collector(evt: Event):
+        if isinstance(evt, ScheduledEvent):
+            received.append(evt)
+
+    bus.register_event_handler(ScheduledEvent, collector)
+
+    # Monkeypatch the loader inside the bus module namespace
+    from llmgine.bus import bus as bus_module
+    events_to_load = [ScheduledEvent(scheduled_time=datetime.now() + timedelta(milliseconds=50))]
+    monkeypatch.setattr(bus_module, "get_and_delete_unfinished_events", lambda: events_to_load)
+
+    await bus.start()
+    await asyncio.sleep(0.2)  # allow scheduled event to fire
+    await bus.stop()
+    await bus.reset()
+
+    assert len(received) == 1
+
+
 if __name__ == "__main__":
     asyncio.run(test_scheduled_events_with_kill())

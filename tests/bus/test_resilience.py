@@ -14,6 +14,7 @@ from llmgine.bus.resilience import (
 )
 from llmgine.llm import SessionID
 from llmgine.messages.commands import Command, CommandResult
+from llmgine.messages.events import DeadLetterCommandEvent
 
 
 @dataclass
@@ -329,3 +330,24 @@ class TestResilientMessageBus:
 
         assert result.success is True
         assert attempts == 3  # Should retry on handler-returned failures too
+
+    @pytest.mark.asyncio
+    async def test_dead_letter_event_is_typed(self, resilient_bus):
+        """Verify we publish a typed dead-letter event."""
+        seen: list[DeadLetterCommandEvent] = []
+
+        async def on_dead_letter(evt: DeadLetterCommandEvent):
+            seen.append(evt)
+
+        async def failing(cmd: AlwaysFailingCommand) -> CommandResult:
+            raise Exception("Always fails")
+
+        resilient_bus.register_event_handler(DeadLetterCommandEvent, on_dead_letter)
+        resilient_bus.register_command_handler(AlwaysFailingCommand, failing)
+
+        result = await resilient_bus.execute(AlwaysFailingCommand(session_id=SessionID("t")))
+        assert result.success is False
+        # Give the bus a moment to process the event
+        await asyncio.sleep(0.05)
+        assert len(seen) == 1
+        assert seen[0].attempts >= 1
